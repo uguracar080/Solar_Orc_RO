@@ -1,0 +1,70 @@
+RO VALIDATION / VERIFICATION STRATEGY v1.5
+==========================================
+
+1. Manufacturer consistency test
+   - Original Lu/Du A and B are used.
+   - This is NOT an exact validation because the detailed Du model does not reproduce
+     the nominal product-sheet point exactly with constant Aref.
+
+2. Datasheet-based A/B parameter identification
+   - A and B are fitted to the same standard product-sheet point.
+   - This is calibration/parameter identification, NOT independent validation.
+   - The calibrated values must not be presented as independently validated constants.
+
+3. Mokhtari-2016 optimum point
+   - Useful as a secondary cross-model benchmark.
+   - Exact optimum feed salinity is not reported; only about 10,000-13,000 ppm is stated.
+   - Total PV count is reported, but stage-by-stage integer split is not directly tabulated.
+   - Therefore recovery/Cp comparison is a reconstruction, not an exact validation.
+   - The salinity/stage-split diagnostic shows these missing inputs alone do not fully
+     explain the Cp discrepancy.
+
+4. Du-2014 published case
+   - This is the key numerical verification for the detailed Du solver because Du gives:
+     feed salinity, temperature, membrane geometry, Aref, B, stage pressures, PV counts,
+     elements/PV, grid size, aging assumptions, recovery, product concentration and
+     average flux.
+   - The published Du result used 30 axial grid points, so verification must first use N=30.
+   - After verification, the present model uses the independent grid study, which indicates
+     150 axial segments for <0.1% Qp and Cp changes relative to N=200.
+
+5. Final annual model
+   - Use the Du detailed local model after verification.
+   - Use 150 axial segments for truth-model data generation unless later tests show a
+     different tolerance/cost tradeoff is preferable.
+   - Manufacturer-calibrated A/B can be evaluated as a separate parameterization, but
+     should not silently replace the literature A/B set.
+
+6. Verification decision after v1.3 results
+   - The aged + gauge-pressure Du case reproduced:
+     recovery within about 1.03%, product concentration within about 0.34%,
+     and average flux within about 1.02%.
+   - Because average flux and recovery are algebraically linked for fixed feed and
+     membrane area, they are not counted as fully independent validation metrics.
+   - Product concentration provides the independent salt-transport verification.
+   - The original Lu/Du A and B set is therefore retained as the primary truth-model
+     parameterization; datasheet-calibrated A/B remains a sensitivity parameterization.
+
+7. Final truth-model convention
+   - External operating pressure inputs are treated as gauge MPa.
+   - The solver converts them internally to absolute MPa.
+   - Final truth-model discretization uses 150 axial segments.
+   - Membrane age is applied explicitly through Du-2014 FF and B-aging equations.
+
+8. Energy verification
+   - v1.4 adds Du-2014 without-ERD SEC verification using SWIP, HPP and interstage
+     booster-pump contributions and compares against the published 4.88 kWh/m3.
+
+
+9. PX verification before performance-map generation
+   - Final RO concept is not yet frozen until the Du-2014 PX case is reproduced.
+   - Published PX targets: Qf=206.6 m3/h, recovery=58.08%, Cp=500 mg/L,
+     stage 1: 20 PV x 5 elements at 7.14 MPa,
+     stage 2: 16 PV x 4 elements at 7.49 MPa,
+     HPP feed flow=121.1 m3/h, average flux=19.67 LMH, SEC=3.22 kWh/m3.
+   - PX equations follow Du-2014 Eq.47-54 and Eq.94.
+   - Because Eq.50 does not explicitly state the pressure unit of its empirical
+     ERI PX-220 leakage correlation, both MPa and bar interpretations are tested.
+   - Because the low-side pressure used in Eq.94 is not explicitly tabulated,
+     0 MPa(g) and post-filter 0.2 MPa(g) interpretations are tested separately.
+   - No parameter is tuned merely to force agreement with the published result.

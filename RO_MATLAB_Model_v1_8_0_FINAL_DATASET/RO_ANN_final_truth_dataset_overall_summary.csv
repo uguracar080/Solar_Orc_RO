@@ -1,0 +1,2 @@
+TotalCount,ValidCount,ValidPct,PhysicalFeasibleCount,RecoveryTargetMetCount,MeanRuntime_s,MedianRuntime_s,MaxRuntime_s,RootFailureCount,RootFailurePct
+2400,2026,84.4166666666667,2085,2109,29.6715379492917,24.60414425,171.7430837,0,0

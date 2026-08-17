@@ -1,0 +1,10 @@
+FailureReason,Count
+Product_salinity_max;Recovery_target_mismatch,145
+Product_salinity_max,73
+Stage1_dP_max;Product_salinity_max;Recovery_target_mismatch,66
+Recovery_target_mismatch,59
+Product_salinity_max;Bulk_brine_concentration_max;Recovery_target_mismatch,12
+Stage1_dP_max,8
+Stage1_dP_max;Recovery_target_mismatch,8
+Stage1_first_element_flux_max,2
+Stage1_first_element_flux_max;Stage1_dP_max;Product_salinity_max;Recovery_target_mismatch,1

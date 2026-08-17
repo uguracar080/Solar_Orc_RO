@@ -1,0 +1,31 @@
+# MATLAB/editor temporary files
+*.asv
+*.m~
+*.autosave
+*.bak
+*.tmp
+
+# OS metadata
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Generated simulation outputs
+Results/
+Figures/figures_*/
+*.fig
+
+# Logs and generated runtime reports
+*.log
+*.lst
+*.out
+
+# Local document and literature archive
+Dokümanlar/
+
+# TRNSYS/generated packages
+PCM-TRNSYS_Matlab_Coupling/*.zip
+
+# GitHub/Codex local artifacts, if created later
+.codex/
+.openai/
