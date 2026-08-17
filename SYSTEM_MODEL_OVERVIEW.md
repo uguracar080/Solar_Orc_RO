@@ -110,7 +110,8 @@ PCM files remain in the repository for later integration. The active V1 storage 
     - `fig_water_balance_v1.m`
     - `fig_temperatures_v1.m`
     - `fig_status_counts_v1.m`
-  - Each run creates a timestamped subfolder such as `Figures/figures_YYYYMMDD_HHMMSS/` and saves `.png` plus `.fig` files.
+  - Runtime figure outputs are written under `Figures/generated_figures/figures_YYYYMMDD_HHMMSS/` and saved as `.png` plus `.fig` files.
+  - `Figures/generated_figures/` is ignored by git; the versioned `Figures/` folder should contain only figure-generation code.
 
 ### Input-data folders
 

@@ -16,8 +16,13 @@ if ~isfolder(figuresRoot)
     mkdir(figuresRoot);
 end
 
+generatedRoot = fullfile(figuresRoot,'generated_figures');
+if ~isfolder(generatedRoot)
+    mkdir(generatedRoot);
+end
+
 tag = char(datetime('now','Format','yyyyMMdd_HHmmss'));
-outDir = fullfile(figuresRoot,['figures_' tag]);
+outDir = fullfile(generatedRoot,['figures_' tag]);
 mkdir(outDir);
 
 Hourly = Results.Hourly;

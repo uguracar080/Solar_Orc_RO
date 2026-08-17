@@ -12,6 +12,7 @@ desktop.ini
 
 # Generated simulation outputs
 Results/
+Figures/generated_figures/
 Figures/figures_*/
 *.fig
 
@@ -29,3 +30,8 @@ PCM-TRNSYS_Matlab_Coupling/*.zip
 # GitHub/Codex local artifacts, if created later
 .codex/
 .openai/
+
+# Local secrets. Prefer Git Credential Manager/GitHub CLI over plaintext tokens.
+.env
+.env.*
+.secrets/
