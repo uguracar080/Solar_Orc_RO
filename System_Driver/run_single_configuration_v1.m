@@ -10,7 +10,7 @@ cfg = system_config_v1(ProjectRoot);
 % Simulation window uses 0-based source hours and a half-open interval.
 % Examples: 0 to 8760 runs the full year; 5500 to 5548 runs 48 hours.
 cfg.sim.startHour = 4500;
-cfg.sim.endHour = 4600;
+cfg.sim.endHour = 4508;
 cfg.sim.timeStep_min = 60;
 
 % Solar field design/operation variables.
