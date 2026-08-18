@@ -7,7 +7,8 @@
 % manual inputs below, and opens one figure. No result or figure file is
 % saved.
 
-clear all; clc;
+clear all; 
+clc;
 
 %% Manual inputs
 script_dir = fileparts(mfilename('fullpath'));
