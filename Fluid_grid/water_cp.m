@@ -4,7 +4,7 @@
 
 clear; clc; close all;
 
-addpath(genpath('F:\PAPERS\ORC Analisys\MATLAB'));
+addpath(genpath('F:\PAPERS\SOLAR-ORC Optimizasyon\System_Mode'));
 
 fluid = 'Water';
 
@@ -17,7 +17,7 @@ T_K = T_C + 273.15;
 %% ------------------------------------------------------------------------
 % 2) REFERANS BASINÇ (önemsiz ama gerekli)
 % ------------------------------------------------------------------------
-P_ref = 5e5;   % 5 bar (liquid garanti)
+P_ref = 1e5;   % 5 bar (liquid garanti)
 
 %% ------------------------------------------------------------------------
 % 3) COOLPROP DATA

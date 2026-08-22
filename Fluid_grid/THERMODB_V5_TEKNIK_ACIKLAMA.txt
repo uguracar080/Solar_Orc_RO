@@ -1,0 +1,748 @@
+THERMODB V5 TEKNIK ACIKLAMA
+===========================
+
+Bu dokuman, Fluid_grid/grid_generator_V5.m ile uretilen thermoDB_v5
+yapisinin teknik anlamini aciklar. Amac, kodlara bakmadan bir .mat
+ozellik dosyasinin hangi tablolari icerdigini, bu tablolardan hangi
+termodinamik/transport ozelliklerin nasil bulunacagini ve ORC/Cooling
+Tower gibi alt sistemlerde CoolProp cagrilarinin nasil kaldirilabilecegini
+anlasilir hale getirmektir.
+
+
+1. GENEL AMAC
+-------------
+
+thermoDB_v5 dosyasi, secilen bir akiskan icin CoolProp ile onceden
+hesaplanmis ozellik tablolarini .mat dosyasinda saklar. Simulasyon
+sirasinda CoolProp cagrisi yapmak yerine bu dosya yuklenir ve ozellikler
+interpolasyonla bulunur.
+
+Temel hedefler:
+
+- ORC calisma akiskani R1233zd(E) icin runtime CoolProp bagimliligini
+  kaldirmak.
+- ORC condenser, cooling tower ve reheater/preheater gibi su kullanan
+  bolumlerde Water ozelliklerini de ayni mantikla dosyadan okumak.
+- Her alt sistemin kendi klasorundeki .mat dosyasini kullanmasina izin
+  vermek. Ornegin ORC_v23 kendi klasorundeki R1233zd(E) ve/veya Water
+  dosyasini, CoolingTower kendi klasorundeki Water dosyasini kullanabilir.
+
+
+2. DOSYA URETIMI
+----------------
+
+Varsayilan R1233zd(E) V5 uretimi:
+
+    cd('F:\PAPERS\SOLAR-ORC Optimizasyon\System_Model\Fluid_grid')
+    grid_generator_V5
+
+Varsayilan Water V5 uretimi:
+
+    cd('F:\PAPERS\SOLAR-ORC Optimizasyon\System_Model\Fluid_grid')
+    water_grid_generator_V1
+
+Dar aralikli test:
+
+    cd('F:\PAPERS\SOLAR-ORC Optimizasyon\System_Model\Fluid_grid')
+    test_grid_generator_V5_small
+
+Kucuk test dosyalari Fluid_grid/test_outputs klasorune yazilir.
+
+Tam grid icin varsayilan cozumleme genellikle 1000 x 1000 mertebesindedir.
+Kucuk testlerde Np, Nh, Ns, Nt ve Nsat daha dusuk secilir.
+
+
+3. ANA YAPI
+-----------
+
+.mat dosyasi icinde ana degisken adi:
+
+    thermoDB
+
+thermoDB alanlari:
+
+    thermoDB.schema
+    thermoDB.fluid
+    thermoDB.meta
+    thermoDB.ranges
+    thermoDB.sat
+    thermoDB.Ps
+    thermoDB.Ph
+    thermoDB.PT
+    thermoDB.iso
+    thermoDB.qualityConvention
+    thermoDB.transportUnits
+    thermoDB.createdAt
+
+schema degeri:
+
+    'thermoDB_v5'
+
+Bu deger backend tarafinda dosyanin V5 formatinda olup olmadigini kontrol
+etmek icin kullanilabilir.
+
+
+4. BIRIMLER
+-----------
+
+Tum tablolar SI birimindedir.
+
+Basinc:
+
+    P [Pa]
+
+Sicaklik:
+
+    T [K]
+
+Entalpi:
+
+    H, h, hf, hg, h2s [J/kg]
+
+Entropi:
+
+    S, s, sf, sg [J/kg/K]
+
+Yogunluk:
+
+    rho, rho_f, rho_g [kg/m3]
+
+Sabit basinc ozgul isi:
+
+    cp [J/kg/K]
+
+Dinamik viskozite:
+
+    mu [Pa*s]
+
+Isil iletkenlik:
+
+    k [W/m/K]
+
+Kalite:
+
+    Q [-]
+
+Q = 0 doymus sivi, Q = 1 doymus buhar, 0 < Q < 1 iki-faz karisimdir.
+Tek-faz bolgede Q = NaN tutulur.
+
+
+5. meta ALANI
+-------------
+
+thermoDB.meta dosya hakkinda kritik bilgileri tutar.
+
+Tipik alanlar:
+
+    meta.Pcrit      kritik basinc [Pa]
+    meta.Tcrit      kritik sicaklik [K]
+    meta.Tmin       CoolProp alt sicaklik siniri [K]
+    meta.Tmax       CoolProp ust sicaklik siniri [K]
+    meta.rhocrit    kritik yogunluk [kg/m3]
+    meta.generator  generator adi
+    meta.source     veri kaynagi aciklamasi
+    meta.k_model    isil iletkenlik modeli
+
+R1233zd(E) icin k_model:
+
+    NIST R1233zd(E) background correlation copied into generator
+
+Bu, R1233zd(E) isil iletkenliginin CoolProp'tan alinmadigi, generator
+icindeki NIST korelasyonundan hesaplandigi anlamina gelir.
+
+
+6. ranges ALANI
+---------------
+
+thermoDB.ranges, generator calisirken kullanilan secimleri saklar.
+
+Onemli alanlar:
+
+    fluid
+    Pmin_bar, Pmax_bar
+    hmin, hmax
+    smin, smax
+    Tmin_K, Tmax_K
+    Np, Nh, Ns, Nt, Nsat
+    satPressureFractionOfCritical
+    fileSuffix
+
+Backend, bir istek grid araligi disina cikarsa bunu bu alanlara bakarak
+tespit edebilir. Aralik disinda extrapolasyon yapmak teknik olarak mumkun
+olsa da tavsiye edilmez; en guvenli davranis hata veya kontrollu fallback
+vermektir.
+
+
+7. sat TABLOSU: DOYMA TABLOSU
+----------------------------
+
+thermoDB.sat, basinca bagli doymus sivi ve doymus buhar ozelliklerini
+tutar.
+
+Alanlar:
+
+    sat.P
+    sat.T
+    sat.hf
+    sat.hg
+    sat.sf
+    sat.sg
+    sat.rho_f
+    sat.rho_g
+    sat.cp_f
+    sat.cp_g
+    sat.mu_f
+    sat.mu_g
+    sat.k_f
+    sat.k_g
+
+Burada:
+
+    f = saturated liquid, Q = 0
+    g = saturated vapor,  Q = 1
+
+Kullanim ornekleri:
+
+    T_sat(P)      = interp1(sat.P, sat.T, P)
+    h_f(P)        = interp1(sat.P, sat.hf, P)
+    h_g(P)        = interp1(sat.P, sat.hg, P)
+    rho_l(P)      = interp1(sat.P, sat.rho_f, P)
+    rho_v(P)      = interp1(sat.P, sat.rho_g, P)
+    mu_l(P)       = interp1(sat.P, sat.mu_f, P)
+    mu_v(P)       = interp1(sat.P, sat.mu_g, P)
+    k_l(P)        = interp1(sat.P, sat.k_f, P)
+    k_v(P)        = interp1(sat.P, sat.k_g, P)
+
+ORC iki-faz evaporator/condenser hesaplarinda en kritik tablo budur.
+Boiling, condensation ve iki-faz basinc kaybi korelasyonlari genellikle
+karisim cp'si yerine doymus sivi ve doymus buhar ozelliklerini ayri ayri
+ister.
+
+
+8. Ps TABLOSU: (P,s) GRID
+------------------------
+
+thermoDB.Ps, basinc ve entropi girdilerinden ozellik bulmak icindir.
+
+Eksenler:
+
+    Ps.P [1 x Np] veya [Np x 1]
+    Ps.s [1 x Ns]
+
+Tablolar:
+
+    Ps.H      h(P,s)
+    Ps.T      T(P,s)
+    Ps.rho    rho(P,s)
+    Ps.cp     cp(P,s)
+    Ps.mu     mu(P,s)
+    Ps.k      k(P,s)
+    Ps.Q      Q(P,s)
+
+Boyut mantigi:
+
+    Ps.H(i,j) = H(Ps.P(i), Ps.s(j))
+
+Tipik kullanim:
+
+    H = interpn(Ps.P, Ps.s, Ps.H, P, s, 'linear')
+    T = interpn(Ps.P, Ps.s, Ps.T, P, s, 'linear')
+
+ORC'de ozellikle pompa ve turbin izentropik cikis hesaplari icin onemlidir:
+
+    h2s = H(P2, s1)
+
+V5 ayrica iso tablosunda bu amac icin transpoze bir yardimci tablo da
+tutar.
+
+
+9. Ph TABLOSU: (P,h) GRID
+------------------------
+
+thermoDB.Ph, basinc ve entalpi girdilerinden ozellik bulmak icindir.
+
+Eksenler:
+
+    Ph.P [1 x Np] veya [Np x 1]
+    Ph.h [1 x Nh]
+
+Tablolar:
+
+    Ph.T      T(P,h)
+    Ph.s      s(P,h)
+    Ph.rho    rho(P,h)
+    Ph.cp     cp(P,h)
+    Ph.mu     mu(P,h)
+    Ph.k      k(P,h)
+    Ph.Q      Q(P,h)
+
+Boyut mantigi:
+
+    Ph.T(i,j) = T(Ph.P(i), Ph.h(j))
+
+Tipik kullanim:
+
+    T   = interpn(Ph.P, Ph.h, Ph.T, P, h, 'linear')
+    s   = interpn(Ph.P, Ph.h, Ph.s, P, h, 'linear')
+    rho = interpn(Ph.P, Ph.h, Ph.rho, P, h, 'linear')
+
+ORC'de turbine cikisi, pump cikisi, desuperheating ve subcooling gibi
+tek-faz bolge durumlari icin cok kullanislidir.
+
+Onemli iki-faz notu:
+
+    Ph.Q(P,h) 0 ile 1 arasindaysa nokta iki-faz bolgededir.
+
+Iki-faz bolgede Ph.cp gibi dogrudan karisim ozelliklerinin kullanimi
+dikkat ister. Bu durumda backend'in sat tablosuna donmesi daha guvenlidir.
+Bu konu 13. bolumde ayrintili anlatilmistir.
+
+
+10. PT TABLOSU: (P,T) GRID
+-------------------------
+
+thermoDB.PT, basinc ve sicaklik girdilerinden ozellik bulmak icindir.
+
+Eksenler:
+
+    PT.P [1 x Np] veya [Np x 1]
+    PT.T [1 x Nt]
+
+Tablolar:
+
+    PT.H      H(P,T)
+    PT.s      s(P,T)
+    PT.rho    rho(P,T)
+    PT.cp     cp(P,T)
+    PT.mu     mu(P,T)
+    PT.k      k(P,T)
+    PT.Q      Q(P,T)
+
+Boyut mantigi:
+
+    PT.H(i,j) = H(PT.P(i), PT.T(j))
+
+Su tarafinda en onemli tablo genellikle PT tablosudur. Condenser sogutma
+suyu, cooling tower su devresi ve reheater/preheater su akislari genellikle
+T ve P ile tanimlanir.
+
+Tipik kullanim:
+
+    h   = interpn(PT.P, PT.T, PT.H, P, T, 'linear')
+    cp  = interpn(PT.P, PT.T, PT.cp, P, T, 'linear')
+    mu  = interpn(PT.P, PT.T, PT.mu, P, T, 'linear')
+    k   = interpn(PT.P, PT.T, PT.k, P, T, 'linear')
+    rho = interpn(PT.P, PT.T, PT.rho, P, T, 'linear')
+
+
+11. iso TABLOSU: IZENTROPIK ENTALPI YARDIMCISI
+------------------------------------------------
+
+thermoDB.iso, turbin/pompa izentropik cikis entalpisini hizli bulmak icin
+tutulur.
+
+Alanlar:
+
+    iso.P
+    iso.s
+    iso.h2s
+
+Boyut mantigi:
+
+    iso.h2s(j,i) = h(iso.P(i), iso.s(j))
+
+Bu tablo aslinda Ps.H tablosunun transpozudur:
+
+    iso.h2s = Ps.H.'
+
+Kullanim:
+
+    h2s = interpn(iso.s, iso.P, iso.h2s, s1, P2, 'linear')
+
+Alternatif olarak dogrudan Ps.H de kullanilabilir:
+
+    h2s = interpn(Ps.P, Ps.s, Ps.H, P2, s1, 'linear')
+
+
+12. COOLPROP ISTEKLERININ V5 TABLOLARINA ESLESTIRILMESI
+-------------------------------------------------------
+
+ORC tarafindaki orc_properties(config,...) arayuzu PropsSI benzeri istekler
+alir. Fluid-grid backend acildiginda bu istekler su sekilde cozulmelidir.
+
+Trivial/metadata istekleri:
+
+    PropsSI('PCRIT',fluid)  -> thermoDB.meta.Pcrit
+    PropsSI('TCRIT',fluid)  -> thermoDB.meta.Tcrit
+    PropsSI('TMIN',fluid)   -> thermoDB.meta.Tmin
+    PropsSI('TMAX',fluid)   -> thermoDB.meta.Tmax
+
+Doyma istekleri:
+
+    PropsSI('T','P',P,'Q',0,fluid) -> sat.T(P)
+    PropsSI('H','P',P,'Q',0,fluid) -> sat.hf(P)
+    PropsSI('H','P',P,'Q',1,fluid) -> sat.hg(P)
+    PropsSI('S','P',P,'Q',0,fluid) -> sat.sf(P)
+    PropsSI('S','P',P,'Q',1,fluid) -> sat.sg(P)
+    PropsSI('D','P',P,'Q',0,fluid) -> sat.rho_f(P)
+    PropsSI('D','P',P,'Q',1,fluid) -> sat.rho_g(P)
+    PropsSI('C','P',P,'Q',0,fluid) -> sat.cp_f(P)
+    PropsSI('C','P',P,'Q',1,fluid) -> sat.cp_g(P)
+    PropsSI('V','P',P,'Q',0,fluid) -> sat.mu_f(P)
+    PropsSI('V','P',P,'Q',1,fluid) -> sat.mu_g(P)
+    PropsSI('L','P',P,'Q',0,fluid) -> sat.k_f(P)
+    PropsSI('L','P',P,'Q',1,fluid) -> sat.k_g(P)
+
+(P,s) istekleri:
+
+    PropsSI('H','P',P,'S',s,fluid) -> Ps.H(P,s)
+    PropsSI('T','P',P,'S',s,fluid) -> Ps.T(P,s)
+    PropsSI('D','P',P,'S',s,fluid) -> Ps.rho(P,s)
+    PropsSI('C','P',P,'S',s,fluid) -> Ps.cp(P,s), tek-faz ise
+    PropsSI('V','P',P,'S',s,fluid) -> Ps.mu(P,s), tek-faz ise
+    PropsSI('L','P',P,'S',s,fluid) -> Ps.k(P,s),  tek-faz ise
+    PropsSI('Q','P',P,'S',s,fluid) -> Ps.Q(P,s)
+
+(P,h) istekleri:
+
+    PropsSI('T','P',P,'H',h,fluid) -> Ph.T(P,h)
+    PropsSI('S','P',P,'H',h,fluid) -> Ph.s(P,h)
+    PropsSI('D','P',P,'H',h,fluid) -> Ph.rho(P,h), tek-faz ise
+    PropsSI('C','P',P,'H',h,fluid) -> Ph.cp(P,h),  tek-faz ise
+    PropsSI('V','P',P,'H',h,fluid) -> Ph.mu(P,h),  tek-faz ise
+    PropsSI('L','P',P,'H',h,fluid) -> Ph.k(P,h),   tek-faz ise
+    PropsSI('Q','P',P,'H',h,fluid) -> Ph.Q(P,h)
+
+(P,T) istekleri:
+
+    PropsSI('H','P',P,'T',T,fluid) -> PT.H(P,T)
+    PropsSI('S','P',P,'T',T,fluid) -> PT.s(P,T)
+    PropsSI('D','P',P,'T',T,fluid) -> PT.rho(P,T)
+    PropsSI('C','P',P,'T',T,fluid) -> PT.cp(P,T)
+    PropsSI('V','P',P,'T',T,fluid) -> PT.mu(P,T)
+    PropsSI('L','P',P,'T',T,fluid) -> PT.k(P,T)
+    PropsSI('Q','P',P,'T',T,fluid) -> PT.Q(P,T)
+
+Backend ilk versiyonda yalnizca desteklenen state pair'leri kabul etmelidir:
+
+    P,Q
+    P,S
+    P,H
+    P,T
+
+Diger state pair'ler gerekiyorsa ayrica tasarlanmalidir.
+
+
+13. IKI-FAZ BOLGEDE NASIL DAVRANILMALI?
+---------------------------------------
+
+Iki-faz bolge, doymus sivi ve doymus buhar arasindaki karisim bolgesidir.
+Bu bolgede basinc sabitken sicaklik doymus sicakliktir ve entalpi buyuk
+olcude kaliteyi belirtir.
+
+P,h verildiginde kalite:
+
+    h_f = sat.hf(P)
+    h_g = sat.hg(P)
+    Q = (h - h_f) / (h_g - h_f)
+
+P,s verildiginde kalite:
+
+    s_f = sat.sf(P)
+    s_g = sat.sg(P)
+    Q = (s - s_f) / (s_g - s_f)
+
+Eger:
+
+    0 <= Q <= 1
+
+ise nokta iki-faz bolgededir.
+
+Bu durumda iki farkli ozellik tipi vardir:
+
+1) Faz siniri ozellikleri:
+
+    rho_l, rho_v, mu_l, mu_v, k_l, k_v, cp_l, cp_v
+
+Bu degerler dogrudan sat tablosundan okunmalidir:
+
+    rho_l = sat.rho_f(P)
+    rho_v = sat.rho_g(P)
+    mu_l  = sat.mu_f(P)
+    mu_v  = sat.mu_g(P)
+    k_l   = sat.k_f(P)
+    k_v   = sat.k_g(P)
+    cp_l  = sat.cp_f(P)
+    cp_v  = sat.cp_g(P)
+
+2) Karisim ozellikleri:
+
+    rho_mix, mu_mix, cp_mix, k_mix gibi degerler.
+
+Bu degerler fiziksel modele baglidir. Her korelasyon ayni karisim kuralini
+kullanmaz. Bu nedenle backend'in iki-faz bolgede otomatik olarak
+
+    cp_mix = (1-Q)*cp_f + Q*cp_g
+
+gibi basit bir deger dondurmesi her zaman dogru degildir.
+
+ORC icin onerilen davranis:
+
+- Eger istek P,Q seklindeyse sat tablosundan doymus sivi/buhar ozelligi
+  dondur.
+- Eger istek P,H veya P,S seklinde ve istenen ozellik T, S, H veya Q ise
+  Ph/Ps tablosu ve sat bilgisi kullanilabilir.
+- Eger istek P,H veya P,S seklinde ve istenen ozellik cp, mu veya k ise:
+  - Q NaN ise tek-fazdir; Ph/Ps gridinden interpolasyon yap.
+  - 0 <= Q <= 1 ise iki-fazdir; karisim cp/mu/k dondurmek yerine ilgili
+    hesap modulu sat tablosundaki faz ozelliklerini kullanmalidir.
+
+Pratik anlam:
+
+    Iki-faz bolgede de CoolProp cagrilmaz.
+    Degerler yine .mat dosyasindan gelir.
+    Ancak iki-fazda dogru kaynak genellikle Ph.cp degil, sat.cp_f/sat.cp_g
+    gibi sat tablosudur.
+
+
+14. R1233zd(E) ICIN OZEL k HESABI
+--------------------------------
+
+R1233zd(E) isil iletkenligi V5 generator icinde lokal NIST korelasyonu ile
+hesaplanir. Bu, ORC_v23/orc_r1233zde_thermal_conductivity.m dosyasindaki
+modelle ayni mantiktadir.
+
+Korelasyon girdileri:
+
+    T   [K]
+    rho [kg/m3]
+
+Uretilen deger:
+
+    k [W/m/K]
+
+Generator once ilgili grid noktasinda T ve rho hesaplar, sonra R1233zd(E)
+icin k degerini bu korelasyondan uretir.
+
+Bu sayede R1233zd(E) icin:
+
+    PropsSI('L',...)
+
+runtime sirasinda gerekmeyecek sekilde .mat dosyasina yazilmis olur.
+
+
+15. WATER ICIN OZEL NOT
+----------------------
+
+Water generator, grid_generator_V5 motorunu suya uygun araliklarla cagirir.
+
+Su devrelerinde en yaygin istekler:
+
+    H(P,T)
+    rho(P,T)
+    cp(P,T)
+    mu(P,T)
+    k(P,T)
+
+Bu nedenle Water dosyasinda PT tablosu kritik onemdedir.
+
+Cooling tower ve condenser tarafinda tipik kullanim:
+
+    cp_water  = PT.cp(P,T)
+    rho_water = PT.rho(P,T)
+    mu_water  = PT.mu(P,T)
+    k_water   = PT.k(P,T)
+    h_water   = PT.H(P,T)
+
+Eger su sadece sivi fazda kullaniliyorsa PT tablosu genellikle yeterlidir.
+P,h veya P,s cagrilari da desteklenmek istendigi icin Ph ve Ps tablolari
+ayni semada tutulur.
+
+
+16. INTERPOLASYON ILKELERI
+-------------------------
+
+Onerilen temel interpolasyon:
+
+    linear interpolation
+
+MATLAB ornegi:
+
+    val = interpn(P_axis, h_axis, field, P_req, h_req, 'linear')
+
+Saturasyon tablosu icin:
+
+    val = interp1(sat.P, sat.hf, P_req, 'linear')
+
+Aralik disi isteklerde:
+
+    Extrapolasyon onerilmez.
+
+Backend su kontrolleri yapmalidir:
+
+- P istenen tablonun P araliginda mi?
+- h, s veya T ilgili eksen araliginda mi?
+- Interpolasyon sonucu finite mi?
+- Iki-faz siniri geciliyorsa Q kontrolu yapildi mi?
+
+Eger bir deger NaN veya Inf ise backend sessizce devam etmemelidir.
+
+
+17. ORC BACKEND TASARIMI ICIN ONERILEN AKIS
+-------------------------------------------
+
+orc_properties(config,...) icinde fluidgrid backend acildiginda:
+
+1. config.orc_property_backend == 'fluidgrid' kontrol edilir.
+2. Ilgili .mat dosyasi bulunur.
+   - Oncelik config.orc_fluidGridFile olabilir.
+   - Bos ise orc_properties.m dosyasinin bulundugu klasorde aranabilir.
+3. thermoDB persistent cache ile bir kez yuklenir.
+4. thermoDB.schema == 'thermoDB_v5' kontrol edilir.
+5. thermoDB.fluid ile istenen fluid adi uyumlu mu kontrol edilir.
+6. PropsSI tarzi istek parse edilir.
+7. State pair secilir: P,Q / P,H / P,S / P,T.
+8. Uygun tablo secilir.
+9. Aralik kontrolu yapilir.
+10. Iki-faz kontrolu gerekiyorsa Q okunur.
+11. Deger interpolasyonla dondurulur.
+12. Sonuc finite degilse hata verilir.
+
+Bu sistemde ORC_v23 icindeki hesap dosyalarinin tek tek CoolProp'tan
+haberdar olmasina gerek yoktur. Tum gecis merkezi olarak orc_properties.m
+ve orc_stream_properties.m seviyesinde yapilmalidir.
+
+
+18. HER SISTEM KENDI .mat DOSYASINI NASIL KULLANIR?
+--------------------------------------------------
+
+Onerilen klasor mantigi:
+
+    ORC_v23/
+        orc_properties.m
+        thermoDB_R1233zd(E)_V5.mat
+        thermoDB_Water_V5.mat
+
+    CoolingTower_v1_phase4_weather_hours_fast/CoolingTower/
+        ct_*.m
+        thermoDB_Water_V5.mat
+
+Backend dosya arama mantigi:
+
+- Once config icinde acik dosya yolu varsa onu kullan.
+- Yoksa cagrilan property fonksiyonunun bulundugu klasorde uygun dosya adi
+  ara.
+- Fluid adi ile dosya adi eslesmeli.
+
+Bu yaklasim sistemlerin birbirinin .mat dosyasina bagimli olmasini engeller.
+
+
+19. V5 ILE V4 ARASINDAKI ANA FARKLAR
+------------------------------------
+
+V4 icerigi:
+
+    sat: P -> T, hf, hg, sf, sg, rho_f, rho_g
+    Ps : P,s -> H, T, rho
+    Ph : P,h -> T, s
+    iso: P,s -> h2s
+
+V5 ekleri:
+
+    Ps.cp
+    Ps.mu
+    Ps.k
+    Ps.Q
+    Ph.rho
+    Ph.cp
+    Ph.mu
+    Ph.k
+    Ph.Q
+    PT.H
+    PT.s
+    PT.rho
+    PT.cp
+    PT.mu
+    PT.k
+    PT.Q
+    sat.cp_f, sat.cp_g
+    sat.mu_f, sat.mu_g
+    sat.k_f, sat.k_g
+    meta/ranges/schema bilgileri
+
+Bu ekler, ORC tarafindaki transport ozellik ihtiyacini ve su devrelerindeki
+P,T tabanli istekleri karsilamak icin gereklidir.
+
+
+20. TEST SONUCLARININ YORUMU
+---------------------------
+
+test_grid_generator_V5_small.m dar aralikli iki dosya uretir:
+
+    thermoDB_R1233zd(E)_V5_SMALL.mat
+    thermoDB_Water_V5_SMALL.mat
+
+Testte ana alanlar icin finite oranlari kontrol edilir.
+
+R1233zd(E) icin Ph midpoint cp hatasi iki-faz bolgeye denk gelirse yuksek
+gorunebilir. Bu bir generator hatasi olarak yorumlanmamalidir. Iki-faz
+bolgede cp'nin dogrudan Ph.cp uzerinden karisim ozelligi gibi kullanilmasi
+fiziksel olarak risklidir. Bu nedenle Q bilgisi eklenmistir.
+
+Water icin PT tablosu genellikle cok duzgun davranir; sivi su ozellikleri
+P,T uzayinda yumusak degisir.
+
+
+21. PRATIK KULLANIM OZETI
+-------------------------
+
+Tek-faz R1233zd(E) P,h durumu:
+
+    T, s, rho, cp, mu, k -> Ph tablosu
+
+R1233zd(E) doymus sivi/buhar durumu:
+
+    T, h, s, rho, cp, mu, k -> sat tablosu
+
+R1233zd(E) iki-faz P,h durumu:
+
+    Q -> Ph.Q veya sat.hf/sat.hg ile hesap
+    T_sat -> sat.T
+    faz ozellikleri -> sat.rho_f/rho_g, sat.cp_f/cp_g, sat.mu_f/mu_g, sat.k_f/k_g
+    CoolProp cagrisi yok
+
+Water P,T durumu:
+
+    h, s, rho, cp, mu, k -> PT tablosu
+
+Metadata:
+
+    Pcrit, Tcrit -> meta
+
+
+22. SINIRLAR VE DIKKAT EDILECEKLER
+----------------------------------
+
+- Grid yalnizca uretilen araliklarda guvenlidir.
+- Iki-faz bolgede karisim cp/mu/k degerleri model secimi gerektirir.
+- Kritik noktaya cok yakin bolgelerde interpolasyon hassas olabilir.
+- 1000 x 1000 cozumleme dosya boyutunu buyutur; ancak runtime hizini ciddi
+  artirabilir.
+- Generator CoolProp'a bagimlidir; fakat uretilen .mat dosyasini kullanan
+  simulasyon backend'i CoolProp'a bagimli olmak zorunda degildir.
+- V5 dosyasi backend tarafinda persistent olarak yuklenmelidir; her property
+  isteginde .mat dosyasini tekrar yuklemek performansi bozar.
+
+
+23. SONUC
+---------
+
+thermoDB_v5, ORC ve su devreleri icin CoolProp cagrilarini runtime'dan
+kaldirmaya yonelik ilk tam altyapi adimidir. R1233zd(E) calisma akiskani
+icin tek-faz, doymus hal ve iki-faz faz siniri ozellikleri .mat dosyasindan
+okunabilir. Water icin ozellikle P,T tablosu condenser, cooling tower ve
+reheater/preheater hesaplari icin hazirdir.
+
+Sonraki uygulama adimi, ORC_v23/orc_properties.m ve
+ORC_v23/orc_stream_properties.m icindeki fluidgrid backend'ini bu V5
+semasini okuyacak sekilde acmaktir.

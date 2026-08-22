@@ -56,8 +56,8 @@ fprintf(['Grid Generation Order: GRID_1_(P,s) -> GRID_2_(P,h) -> ', ...
 % ========================================================================
 %fluid = 'R245fa';
 %fluid = 'R410a';
-%fluid = 'R1233zd(E)';
-fluid = 'R600';
+fluid = 'R1233zd(E)';
+%fluid = 'R600';
 fluid = strtrim(fluid);
 
 try
@@ -69,21 +69,21 @@ end
 fprintf('Selected fluid: "%s"\n', fluid);
 
 % Pressure range
-Pmin_bar = 0.5;
-Pmax_bar = 35;
+Pmin_bar = 1.0;
+Pmax_bar = 34.5;
 
 % Entropy range [J/kg/K]
-smin = 840;
-smax = 2600;
+smin = 1000;
+smax = 1800;
 
 % Enthalpy range [J/kg]
-hmin = 150e3;
-hmax = 750e3;
+hmin = 220e3;
+hmax = 490e3;
 
 % GRID RESOLUTION 
-Np   = 600;
-Ns   = 600;
-Nh   = 600;
+Np   = 1000;
+Ns   = 1000;
+Nh   = 1000;
 Nsat = 1000;
 
 

@@ -1,0 +1,44 @@
+RO ANN parametric sweep summary
+Generated          : 2026-08-21 17:32:20
+Model file         : F:\PAPERS\SOLAR-ORC Optimizasyon\System_Model\RO_MATLAB_Model_v1_8_0_FINAL_DATASET\RO_ANN_models_v1_9_1.mat
+Output directory   : F:\PAPERS\SOLAR-ORC Optimizasyon\System_Model\RO_MATLAB_Model_v1_8_0_FINAL_DATASET\parametric_results\ro_ann_parametric_sweep_20260821_173135
+
+Sweep axes
+Qf_train_m3h       : 47.5 : 1.55 : 63  (11 points)
+T_RO_in_C          : 20 : 0.5 : 45  (51 points)
+Cf_kg_m3           : 38.5 : 0.3 : 41.5  (11 points)
+R_target           : 0.4 : 0.005 : 0.57  (35 points)
+
+Case counts
+Total cases        : 215985
+In domain          : 215985 / 215985
+Feasible           : 79514 / 215985
+Requested mode     : auto
+Actual mode        : parfor
+Chunks             : 22
+Chunk size         : 10000
+Elapsed time       : 33.729 s (0.000156 s/case)
+
+Global feasible minimum SEC case
+case_id            : 56098
+Qf_train_m3h       : 59.900
+T_RO_in_C          : 45.000
+Cf_kg_m3           : 38.500
+R_target           : 0.445
+SEC_kWh_m3         : 2.84376
+W_RO_train_kW      : 75.802
+Qp_train_m3h       : 26.655
+P1/P2 gauge MPa    : 5.406 / 5.664
+
+Best-recovery temperature profile slice
+Qf_train_m3h       : 49.050
+Cf_kg_m3           : 38.800
+First valid T/SEC   : 27.000 C / 5.65047 kWh/m3
+Last valid T/SEC    : 45.000 C / 3.86368 kWh/m3
+
+Temperature summary uses all Qf, Cf, and R points.
+Lowest mean SEC T  : 45.000 C
+Small high-T dSEC/dT : |dSEC/dT| <= 0.0100 first occurs near 35.000 C after 35.0 C
+
+Interpretation note
+Use dSEC_dT columns to decide whether one more degree of feed heating still has meaningful RO value. Small absolute dSEC_dT at high T means forcing condenser pressure upward for preheating is likely not worthwhile unless another system-level constraint needs it.

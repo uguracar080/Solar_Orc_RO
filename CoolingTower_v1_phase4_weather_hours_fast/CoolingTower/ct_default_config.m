@@ -36,6 +36,9 @@ CTConfig.psychrometrics.backend = 'correlation';
 % -------------------------------------------------------------------------
 % Water properties
 % -------------------------------------------------------------------------
+CTConfig.water.property_backend = 'fluidgrid';
+CTConfig.water.gridFile = 'thermoDB_Water_V5.mat';
+CTConfig.water.P_Pa = 2e5;
 CTConfig.water.cp_JkgK = 4180;
 CTConfig.water.rho_kgm3 = 997;
 

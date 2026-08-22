@@ -14,15 +14,15 @@ clear
 clc
 
 %addpath(genpath(pwd));                                           % mevcut klasör ve alt klasörleri path'e ekle
-addpath(genpath('F:\PAPERS\ORC Analisys\MATLAB'));              % istersen kendi ana klasörünü ekle
+addpath(genpath('F:\PAPERS\SOLAR-ORC Optimizasyon\System_Model'));              % istersen kendi ana klasörünü ekle
 
 
 % ------------------------------------------------
 % INPUT
 % ------------------------------------------------
 
-fluid = 'R600';      %  akışkanı buraya yaz
-%fluid = 'R1233zd(E)';      %  akışkanı buraya yaz
+%fluid = 'R600';      %  akışkanı buraya yazR1233zd(E)
+fluid = 'R1233zd(E)';      %  akışkanı buraya yaz
 %fluid = 'Toluene';      %  akışkanı buraya yaz
 %fluid = 'R245fa';      %  akışkanı buraya yaz
 

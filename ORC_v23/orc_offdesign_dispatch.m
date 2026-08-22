@@ -97,6 +97,7 @@ for ic = 1:nCand
 
     if ~err && isstruct(stScreen)
         r = localFillCandidateFromStep(r,stScreen,ref); % screen metrics [-]
+        r = localApplyPreheaterGuard(r,stScreen,config);
 
         if r.feasible
             % Full validation of promising points prevents a one-pass screen
@@ -105,6 +106,7 @@ for ic = 1:nCand
                 try
                     stFinal = orc_offdesign_rating(orcDesign,orcHotStream,orcColdStream,op,config); % [-]
                     r = localFillCandidateFromStep(r,stFinal,ref); % exact metrics [-]
+                    r = localApplyPreheaterGuard(r,stFinal,config);
                     r.validatedFlag = true;          % [-]
                     stUse = stFinal;                 % selected output [-]
                 catch ME2
@@ -600,9 +602,41 @@ r.evap_A_ratio = er.A_ratio;                         % [-]
 r.cond_A_ratio = cr.A_ratio;                         % [-]
 r.evap_pinch_K = er.deltaT_pinch;                    % [K]
 r.cond_pinch_K = cr.deltaT_pinch;                    % [K]
+r.condOutletTemp_C = cr.T_orccw_out - 273.15;        % [degC]
 r.feasible = st.orc_feasible && th.W_orcnet >= ref.W_min; % [-]
 r.guardedFlag = localGetStepField(st,'orc_errorCaught',false); % [-]
 r.status = localGetStepField(st,'orc_status','rated'); % [-]
+end
+
+function r = localApplyPreheaterGuard(r,st,config)
+% Reject otherwise feasible candidates that cannot heat the feed side.
+enabled = isfield(config,'orc_dispatch_preheaterGuardEnabled') && ...
+    logical(config.orc_dispatch_preheaterGuardEnabled);
+if ~enabled
+    return
+end
+targetC = localGetField(config,'orc_dispatch_minCondOutletTemp_C',NaN);
+r.preheaterGuardTarget_C = targetC;
+if ~r.feasible
+    return
+end
+if ~(isfinite(targetC) && isfield(st,'orc_condenser_rate') && ...
+        isfield(st.orc_condenser_rate,'T_orccw_out'))
+    r.feasible = false;
+    r.preheaterGuardPass = false;
+    r.status = 'preheater-temp-guard-missing-target';
+    return
+end
+condOutC = st.orc_condenser_rate.T_orccw_out - 273.15;
+r.condOutletTemp_C = condOutC;
+r.preheaterGuardMargin_K = condOutC - targetC;
+if condOutC < targetC
+    r.feasible = false;
+    r.preheaterGuardPass = false;
+    r.status = 'preheater-temp-guard';
+else
+    r.preheaterGuardPass = true;
+end
 end
 
 % =========================================================================
@@ -702,6 +736,10 @@ r.evap_A_ratio = NaN;                                % [-]
 r.cond_A_ratio = NaN;                                % [-]
 r.evap_pinch_K = NaN;                                % [K]
 r.cond_pinch_K = NaN;                                % [K]
+r.condOutletTemp_C = NaN;                            % [degC]
+r.preheaterGuardTarget_C = NaN;                     % [degC]
+r.preheaterGuardMargin_K = NaN;                     % [K]
+r.preheaterGuardPass = false;                       % [-]
 r.feasible = false;                                  % [-]
 r.validatedFlag = false;                             % [-]
 r.prescreenFlag = false;                             % [-]

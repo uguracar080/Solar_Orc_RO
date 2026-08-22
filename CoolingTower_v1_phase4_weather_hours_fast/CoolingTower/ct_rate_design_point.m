@@ -22,8 +22,6 @@ if nargin < 2 || isempty(CTConfig)
     CTConfig = ct_default_config();
 end
 
-cp = CTConfig.water.cp_JkgK;
-
 Q_rated_W        = getfield_default(CTRatingInput,'Q_rated_W',CTConfig.rating.Q_rated_W);
 T_db_rated_C     = getfield_default(CTRatingInput,'T_db_rated_C',CTConfig.rating.T_db_rated_C);
 T_wb_rated_C     = getfield_default(CTRatingInput,'T_wb_rated_C',CTConfig.rating.T_wb_rated_C);
@@ -37,6 +35,8 @@ validate_positive(approach_rated_C,'CTRatingInput.approach_rated_C');
 
 T_w_out_rated_C = T_wb_rated_C + approach_rated_C;
 T_w_in_rated_C  = T_w_out_rated_C + range_rated_C;
+waterRated = ct_water_properties(0.5*(T_w_in_rated_C + T_w_out_rated_C),CTConfig);
+cp = waterRated.cp_JkgK;
 
 if isfield(CTRatingInput,'mdot_water_rated') && ~isempty(CTRatingInput.mdot_water_rated)
     mdot_water_rated = CTRatingInput.mdot_water_rated;
@@ -102,6 +102,7 @@ CTDesign.mdot_air_rated = mdot_air_rated;
 CTDesign.L_over_G_rated = L_over_G_rated;
 CTDesign.Me_rated = CTMerkelOutput.Me_required;
 CTDesign.W_fan_rated_W = W_fan_rated_W;
+CTDesign.water_rated = waterRated;
 
 CTDesign.air_rated = CTMerkelOutput.air_in;
 CTDesign.merkel_rated = CTMerkelOutput;

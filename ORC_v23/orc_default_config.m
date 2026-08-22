@@ -13,9 +13,10 @@ end
 % =========================================================================
 config = setDefault(config,'orc_modelVersion','0.23');            % ORC model version [-]
 config = setDefault(config,'orc_fluid','R1233zd(E)');           % working fluid [-]
-config = setDefault(config,'orc_property_backend','coolprop');  % property backend [-]
-config = setDefault(config,'orc_useFluidGrid',false);           % use property grid [-]
+config = setDefault(config,'orc_property_backend','fluidgrid'); % property backend [-]
+config = setDefault(config,'orc_useFluidGrid',true);            % use property grid [-]
 config = setDefault(config,'orc_fluidGridFile','');             % property grid file [-]
+config = setDefault(config,'orc_waterFluidGridFile','');        % Water property grid file [-]
 config = setDefault(config,'orc_r1233zde_k_useNist',true);     % use NIST k for R1233zd(E) [-]
 config = setDefault(config,'orc_r1233zde_k_includeCritical',false); % critical enhancement [-]
 
@@ -154,6 +155,8 @@ config = setDefault(config,'orc_dispatch_useThermoPrescreen',true);   % skip imp
 config = setDefault(config,'orc_dispatch_capacityPrescreen',true); % stream heat-capacity prescreen [-]
 config = setDefault(config,'orc_dispatch_capacityApproach_K',1.0); % capacity-screen terminal approach [K]
 config = setDefault(config,'orc_dispatch_capacityToleranceFactor',1.08); % avoid over-pruning [-]
+config = setDefault(config,'orc_dispatch_preheaterGuardEnabled',false); % require condenser outlet hot enough for preheater [-]
+config = setDefault(config,'orc_dispatch_minCondOutletTemp_C',NaN); % minimum condenser water outlet temperature [degC]
 config = setDefault(config,'orc_dispatch_candidateListLimit',320); % built candidate list cap [-]
 config = setDefault(config,'orc_dispatch_coverageMdotFactors',[1.00 0.90 0.80 0.70 0.60 0.50 0.40 0.30]); % early coverage mdot search [-]
 config = setDefault(config,'orc_dispatch_useCoverageTier',true); % interleave low-load candidates earlier [-]

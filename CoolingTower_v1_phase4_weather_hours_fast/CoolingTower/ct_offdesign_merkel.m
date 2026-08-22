@@ -17,7 +17,6 @@ if ~isfield(CTInput,'T_w_in_C')
     error('ct_offdesign_merkel:MissingField','Missing CTInput.T_w_in_C.');
 end
 
-cp = CTConfig.water.cp_JkgK;
 mdot_water = getfield_default(CTInput,'mdot_water',CTDesign.mdot_water_rated);
 CTAir = ct_psychrometrics(CTAmbient,CTConfig);
 
@@ -93,6 +92,7 @@ if ~isfinite(CTOutput.T_w_out_C)
     CTOutput.T_w_out_C = CTInput.T_w_in_C;
 end
 CTOutput.range_C = max(0, CTInput.T_w_in_C - CTOutput.T_w_out_C);
+cp = ct_water_properties(0.5*(CTInput.T_w_in_C + CTOutput.T_w_out_C),CTConfig).cp_JkgK;
 CTOutput.Q_rejected_W = mdot_water*cp*CTOutput.range_C;
 CTOutput.approach_C = CTOutput.T_w_out_C - CTAir.T_wb_C;
 CTOutput.L_over_G = mdot_water/CTFan.mdot_air;
@@ -133,6 +133,7 @@ CTWaterInput.mdot_water = CTOutput.mdot_water;
 CTWaterInput.mdot_air = CTOutput.mdot_air;
 CTWaterInput.air_in = CTOutput.air_in;
 CTWaterInput.air_out = CTAirOut;
+CTWaterInput.T_w_C = 0.5*(CTOutput.T_w_in_C + CTOutput.T_w_out_C);
 CTWaterInput.tower_active = CTOutput.Q_rejected_W > 0 && CTOutput.mdot_air > 0;
 CTWaterUse = ct_water_consumption(CTWaterInput,CTConfig);
 

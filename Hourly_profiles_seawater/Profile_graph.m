@@ -2,7 +2,7 @@
 %  SEAWATER PROFILE - TEMPERATURE AND SALINITY PLOTS
 %  ========================================================================
 
-clear; clc; close all;                                                % Workspace'i, Command Window'u ve açık figürleri temizler.
+clear; clc; %close all;                                                % Workspace'i, Command Window'u ve açık figürleri temizler.
 
 
 %% ========================================================================

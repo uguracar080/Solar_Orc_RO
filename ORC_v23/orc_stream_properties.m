@@ -44,9 +44,7 @@ switch orcBackend
         orcValue = orc_properties(config,varargin{:},orcStream.fluid);
 
     case "fluidgrid"
-        error('orc_stream_properties:FluidGridNotImplemented', ...
-            ['External-stream fluid-grid backend is reserved for the ', ...
-             'later acceleration stage.']);
+        orcValue = orc_properties(config,varargin{:},orcStream.fluid);
 
     otherwise
         error('orc_stream_properties:UnknownBackend', ...

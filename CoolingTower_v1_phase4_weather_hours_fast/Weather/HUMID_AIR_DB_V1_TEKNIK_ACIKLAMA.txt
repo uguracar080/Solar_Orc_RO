@@ -1,0 +1,599 @@
+HUMID AIR DB V1 TEKNIK ACIKLAMA
+===============================
+
+Bu dokuman, CoolingTower_v1_phase4_weather_hours_fast/Weather/
+humid_air_grid_generator_V1.m ile uretilen humidAirDB_v1 yapisinin teknik
+anlamini aciklar. Amac, kodlara bakmadan nemli hava .mat dosyasinin hangi
+tablolari icerdigini, cooling tower hesaplarinda hangi ozelliklerin nasil
+bulunacagini ve HAPropsSI/CoolProp cagrilarinin runtime'dan nasil
+kaldirilabilecegini anlatmaktir.
+
+
+1. GENEL AMAC
+-------------
+
+Cooling tower hesaplarinda nemli hava ozellikleri gerekir. Mevcut modelde
+ct_psychrometrics.m icinde iki yol vardir:
+
+- coolprop/auto yolu: HAPropsSI.m uzerinden CoolProp HumidAirProp kullanir.
+- correlation yolu: hizli yerel psikrometrik korelasyonlar kullanir.
+
+Varsayilan cooling tower ayari zaten correlation'dir. Ancak projede nemli
+hava icin de su ve sogutucu akiskanlarda oldugu gibi dosya-tabanli bir
+altyapi kurmak istiyoruz. humidAirDB_v1 bunun icin hazirlanmistir.
+
+Generator, HAPropsSI/CoolProp kullanarak nemli hava ozelliklerini bir kez
+hesaplar ve .mat dosyasina yazar. Simulasyon sirasinda bu .mat dosyasi
+yuklenerek interpolasyon yapilir; runtime'da CoolProp gerekmez.
+
+
+2. COOLING TOWER'DA GEREKEN HAVA OZELLIKLERI
+--------------------------------------------
+
+CoolingTower_v1_phase4_weather_hours_fast/CoolingTower klasorundeki
+hesaplarda asagidaki nemli hava ozellikleri kullanilir.
+
+Giris hava durumu:
+
+    T_db_C
+    T_wb_C
+    RH
+    RH_pct
+    P_atm_Pa
+    omega
+    h_Jkgda
+    h_kJkgda
+    v_m3kgda
+    rho_da_kgm3
+    rho_ma_kgm3
+
+Doymus hava durumu:
+
+    omega_sat
+    h_sat_Jkgda
+    p_ws_Pa
+
+Cooling tower icindeki temel kullanimlar:
+
+- ct_psychrometrics.m:
+  Giris havasi icin omega, h, Twb, RH, v ve yogunluklari hesaplar.
+
+- ct_merkel_number.m:
+  Merkel integralinde giris hava entalpisi h_air_in_Jkgda ve su sicakligi
+  boyunca doymus hava entalpisi hsat(Twater,P) gerekir.
+
+- ct_air_outlet_state.m:
+  Hava cikisi icin enerji dengesi kurar:
+
+      h_air_out = h_air_in + Q_rejected / mdot_dry_air
+
+  Sonra doymus cikis varsayimi ile:
+
+      h_sat(T_air_out,P) = h_air_out
+
+  esitligini cozer.
+
+- ct_water_consumption.m:
+  Buharlasma kaybini kuru hava bazinda hesaplar:
+
+      mdot_evap = mdot_dry_air * (omega_out - omega_in)
+
+Bu nedenle humidAirDB_v1 icin en kritik iki tablo:
+
+    dbrh : Tdb, RH, P -> giris hava ozellikleri
+    sat  : Tsat, P    -> doymus hava ozellikleri
+
+
+3. WEATHER DOSYASINDAN CIKARILAN SINIRLAR
+-----------------------------------------
+
+Generator varsayilan olarak su dosyalari kullanir:
+
+    Weather cache:
+    TUR_IC_Mersin.173400_TMYx.2009-2023_weather_cache.mat
+
+    EPW:
+    TUR_IC_Mersin.173400_TMYx.2009-2023.epw
+
+Cache varsa once cache okunur. Cache yoksa EPW dosyasindan temel sinirlar
+okunur.
+
+Mevcut Mersin cache dosyasindan gorulen sinirlar:
+
+    Tdb = 1.800 .. 35.300 C
+    Twb = -1.835 .. 29.303 C
+    RH  = 22.000 .. 95.000 %
+    P   = 98875 .. 102923 Pa
+
+Generator bu sinirlara margin ekler. Kucuk testte uretilen tipik aralik:
+
+    Tdb  = -4 .. 41 C
+    Twb  = -5 .. 33 C
+    RH   = 17 .. 100 %
+    P    = 97875 .. 103923 Pa
+    Tsat = -10 .. 95 C
+
+Not:
+
+Giris havasi icin weather sinirlari yeterlidir. Fakat cooling tower cikis
+havasi doymus kabul edildigi icin doymus hava tablosu daha genis sicaklik
+araligini kapsamalidir. Bu nedenle sat tablosu Tsat = -10 .. 95 C gibi
+genis bir aralikta uretilir.
+
+
+4. DOSYA URETIMI
+----------------
+
+Varsayilan generator:
+
+    cd('F:\PAPERS\SOLAR-ORC Optimizasyon\System_Model\CoolingTower_v1_phase4_weather_hours_fast\Weather')
+    humid_air_grid_generator_V1
+
+Kucuk test:
+
+    cd('F:\PAPERS\SOLAR-ORC Optimizasyon\System_Model\CoolingTower_v1_phase4_weather_hours_fast\Weather')
+    test_humid_air_grid_generator_V1_small
+
+Kucuk test cikisi:
+
+    Weather/test_outputs/humidAirDB_Mersin_V1_SMALL.mat
+
+Varsayilan tam dosya, generator ayarlarina gore CoolingTower klasorune
+yazilacak sekilde tasarlanmistir. Boylece cooling tower kendi klasorundeki
+.mat dosyasini kullanabilir.
+
+
+5. ANA YAPI
+-----------
+
+.mat dosyasi icinde ana degisken adi:
+
+    humidAirDB
+
+humidAirDB alanlari:
+
+    humidAirDB.schema
+    humidAirDB.fluid
+    humidAirDB.meta
+    humidAirDB.ranges
+    humidAirDB.dbwb
+    humidAirDB.dbrh
+    humidAirDB.sat
+    humidAirDB.units
+
+schema:
+
+    'humidAirDB_v1'
+
+fluid:
+
+    'HumidAir'
+
+Bu iki alan backend tarafinda dosya formatini ve akiskan tipini kontrol
+etmek icin kullanilabilir.
+
+
+6. BIRIMLER
+-----------
+
+Tum tablolar asagidaki birimlerle saklanir.
+
+Sicaklik:
+
+    Tdb_C, Twb_C, Tsat_C [degC]
+
+Basinc:
+
+    P_Pa [Pa]
+
+Bagil nem:
+
+    RH [-]
+    RH_pct [%] sadece cikti yapilarinda kullanilabilir
+
+Nem orani:
+
+    omega [kg_water/kg_dry_air]
+
+Entalpi:
+
+    h_Jkgda, h_sat_Jkgda [J/kg_dry_air]
+
+Ozgul hacim:
+
+    v_m3kgda [m3/kg_dry_air]
+
+Kuru hava yogunlugu:
+
+    rho_da_kgm3 [kg_dry_air/m3_moist_air]
+
+Nemli hava yogunlugu:
+
+    rho_ma_kgm3 [kg_moist_air/m3_moist_air]
+
+Su buhari doymus basinci:
+
+    p_ws_Pa [Pa]
+
+
+7. meta ALANI
+-------------
+
+humidAirDB.meta dosya hakkinda aciklayici bilgileri tutar.
+
+Tipik alanlar:
+
+    meta.generator
+    meta.source
+    meta.weatherCacheFile
+    meta.epwFile
+    meta.createdAt
+    meta.weatherSummary
+
+source:
+
+    'CoolProp HumidAirProp.HAPropsSI'
+
+weatherSummary icinde weather/cache sinirlari yer alir:
+
+    Tdb_min_C, Tdb_max_C
+    Twb_min_C, Twb_max_C
+    RH_min_pct, RH_max_pct
+    P_min_Pa, P_max_Pa
+    nRows
+    source
+
+
+8. ranges ALANI
+---------------
+
+humidAirDB.ranges, generator calisirken kullanilan eksen ve cozumleme
+ayarlarini saklar.
+
+Onemli alanlar:
+
+    Tdb_min_C, Tdb_max_C
+    Twb_min_C, Twb_max_C
+    RH_min, RH_max
+    P_min_Pa, P_max_Pa
+    Tsat_min_C, Tsat_max_C
+    N_Tdb, N_Twb, N_RH, N_P, N_Tsat
+    useWeatherRanges
+    generateDbWb
+    outputDir
+    fileSuffix
+
+Backend, istenen noktanin tablo araliklari icinde olup olmadigini bu alanlar
+ve eksen vektorleri ile kontrol etmelidir.
+
+
+9. dbrh TABLOSU: Tdb, RH, P -> HAVA OZELLIKLERI
+------------------------------------------------
+
+dbrh, proje icin ana giris hava tablosudur. EPW/cache dosyasi zaten Tdb,
+RH ve P verdigi icin bu tablo cooling tower runtime icin en temiz secimdir.
+
+Eksenler:
+
+    dbrh.Tdb_C
+    dbrh.RH
+    dbrh.P_Pa
+
+Tablolar:
+
+    dbrh.omega
+    dbrh.h_Jkgda
+    dbrh.Twb_C
+    dbrh.v_m3kgda
+    dbrh.rho_da_kgm3
+    dbrh.rho_ma_kgm3
+
+Boyut mantigi:
+
+    dbrh.omega(i,j,k) = omega(Tdb_C(i), RH(j), P_Pa(k))
+
+MATLAB interpolasyon ornegi:
+
+    omega = interpn(dbrh.Tdb_C, dbrh.RH, dbrh.P_Pa, ...
+        dbrh.omega, Tdb_req_C, RH_req, P_req_Pa, 'linear')
+
+    h = interpn(dbrh.Tdb_C, dbrh.RH, dbrh.P_Pa, ...
+        dbrh.h_Jkgda, Tdb_req_C, RH_req, P_req_Pa, 'linear')
+
+    Twb = interpn(dbrh.Tdb_C, dbrh.RH, dbrh.P_Pa, ...
+        dbrh.Twb_C, Tdb_req_C, RH_req, P_req_Pa, 'linear')
+
+Cooling tower giris havasi icin onerilen kaynak budur.
+
+
+10. sat TABLOSU: Tsat, P -> DOYMUS HAVA OZELLIKLERI
+---------------------------------------------------
+
+sat tablosu doymus hava ozelliklerini verir. Cooling tower cikis havasi
+modelinde ve Merkel integralinde kritik rol oynar.
+
+Eksenler:
+
+    sat.T_C
+    sat.P_Pa
+
+Tablolar:
+
+    sat.omega_sat
+    sat.h_sat_Jkgda
+    sat.p_ws_Pa
+    sat.v_m3kgda
+    sat.rho_da_kgm3
+    sat.rho_ma_kgm3
+
+Boyut mantigi:
+
+    sat.h_sat_Jkgda(i,k) = h_sat(T_C(i), P_Pa(k))
+
+MATLAB interpolasyon ornegi:
+
+    hsat = interpn(sat.T_C, sat.P_Pa, sat.h_sat_Jkgda, ...
+        T_req_C, P_req_Pa, 'linear')
+
+    omega_sat = interpn(sat.T_C, sat.P_Pa, sat.omega_sat, ...
+        T_req_C, P_req_Pa, 'linear')
+
+ct_merkel_number.m icin:
+
+    hsat(Twater_C,P) -> sat.h_sat_Jkgda
+
+ct_air_outlet_state.m icin:
+
+    h_target = h_air_in + Q_rejected/mdot_dry_air
+
+    T_air_out, sat.h_sat_Jkgda(T_air_out,P) = h_target
+    esitligi ile bulunur.
+
+Sonra:
+
+    omega_air_out = sat.omega_sat(T_air_out,P)
+
+
+11. dbwb TABLOSU: Tdb, Twb, P -> HAVA OZELLIKLERI
+-------------------------------------------------
+
+dbwb, Tdb/Twb/P girdili alternatif tablodur.
+
+Eksenler:
+
+    dbwb.Tdb_C
+    dbwb.Twb_C
+    dbwb.P_Pa
+
+Tablolar:
+
+    dbwb.omega
+    dbwb.h_Jkgda
+    dbwb.RH
+    dbwb.v_m3kgda
+    dbwb.rho_da_kgm3
+    dbwb.rho_ma_kgm3
+
+Ancak V1'de dbwb varsayilan olarak uretilmez:
+
+    generateDbWb = false
+
+Nedeni:
+
+- Tdb/Twb gridinde fiziksel olarak gecersiz cok sayida kombinasyon vardir.
+  Ornegin Twb > Tdb mumkun degildir.
+- HAPropsSI bu gecersiz veya sinira yakin noktalarda yavaslayabilir.
+- Proje weather/cache verisi zaten RH sagladigi icin dbrh tablosu daha
+  temizdir.
+
+Eger ileride Twb tabanli giris kesin gerekli olursa generateDbWb=true ile
+bu tablo ayrica uretilebilir. Backend bu durumda gecersiz noktalarin NaN
+olabilecegini bilmelidir.
+
+
+12. COOLING TOWER BACKEND TASARIMI
+----------------------------------
+
+ct_psychrometrics.m icin dosya-tabanli backend eklendiginde onerilen akis:
+
+1. CTConfig.psychrometrics.backend == 'fluidgrid' veya benzeri secenek
+   kontrol edilir.
+2. CoolingTower klasorunde humidAirDB_Mersin_V1.mat gibi uygun dosya aranir.
+3. humidAirDB persistent cache ile bir kez yuklenir.
+4. schema == 'humidAirDB_v1' kontrol edilir.
+5. CTAmbient icinden T_db_C, P_atm_Pa ve nem bilgisi okunur.
+6. Eger RH_pct veya RH varsa dbrh tablosu kullanilir.
+7. Eger yalniz T_wb_C varsa:
+   - dbwb tablosu uretilmisse dbwb kullanilir.
+   - Uretilmemisse correlation fallback veya hata verilebilir.
+8. h, omega, Twb, RH, v, rho_da, rho_ma interpolasyonla bulunur.
+9. Doymus hava ozellikleri sat tablosundan T_db_C ve P icin okunur:
+   - omega_sat
+   - h_sat_Jkgda
+   - p_ws_Pa
+10. CTAir yapisi mevcut ct_psychrometrics cikti alanlariyla ayni sekilde
+    doldurulur.
+
+ct_air_outlet_state.m icin:
+
+1. h_target hesaplanir.
+2. sat.h_sat_Jkgda(T,P) tablosunda T icin ters cozum yapilir.
+   Basit yontem:
+
+       f(T) = hsat_grid(T,P) - h_target
+       fzero veya interp1 tersleme
+
+3. T_air_out bulununca omega_air_out = sat.omega_sat(T_air_out,P) okunur.
+
+Bu islemde runtime HAPropsSI/CoolProp cagrisi gerekmez.
+
+
+13. INTERPOLASYON ILKELERI
+--------------------------
+
+Onerilen interpolasyon:
+
+    linear interpolation
+
+dbrh icin:
+
+    interpn(Tdb_axis, RH_axis, P_axis, field, Tdb, RH, P, 'linear')
+
+sat icin:
+
+    interpn(T_axis, P_axis, field, T, P, 'linear')
+
+Ters doymus entalpi cozumu icin:
+
+    hsat_vec = sat.h_sat_Jkgda(:,ip_interp)
+
+daha iyi yontem:
+
+    P icin once iki basinc dilimi arasinda hsat(T) egri interpolasyonu
+    yapilir, sonra h_target'a karsilik gelen T interp1 ile bulunur.
+
+Basit yaklasim:
+
+    T_out = interp1(hsat_at_P, sat.T_C, h_target, 'linear')
+
+hsat(T,P) monoton artan oldugu surece bu uygundur.
+
+Aralik disi isteklerde extrapolasyon onerilmez. Backend su kontrolleri
+yapmalidir:
+
+- Tdb dbrh.Tdb_C araliginda mi?
+- RH dbrh.RH araliginda mi?
+- P dbrh.P_Pa veya sat.P_Pa araliginda mi?
+- T_air_out sat.T_C araliginda mi?
+- Interpolasyon sonucu finite mi?
+
+
+14. NEDEN Tsat UST SINIRI 95 C?
+-------------------------------
+
+Ilk testte Tsat = 100 C ve P = yaklasik 97.9 kPa gibi dusuk atmosfer
+basincinda HAPropsSI sinira geldi ve son noktalarda NaN verdi. Cooling tower
+cikis havasi pratikte bu projede 95 C'nin cok altinda kalacaktir. Bu nedenle
+V1 varsayilan doymus hava ust siniri 95 C secilmistir.
+
+Eger ileride daha yuksek hava cikis sicakligi fiziksel olarak beklenirse:
+
+- P araligi ve Tsat araligi birlikte yeniden incelenmeli,
+- HAPropsSI'nin gecersiz/sinir bolgeleri temizlenmeli,
+- backend aralik disi h_target durumunu "SATURATION_UPPER_LIMIT" gibi
+  kontrollu durumla ele almalidir.
+
+
+15. TEST SONUCLARININ YORUMU
+----------------------------
+
+test_humid_air_grid_generator_V1_small.m su dosyayi uretir:
+
+    Weather/test_outputs/humidAirDB_Mersin_V1_SMALL.mat
+
+Kucuk testte:
+
+    dbrh finite ratio = 1.0000
+    sat finite ratio  = 1.0000
+
+Orta nokta karsilastirmasinda yaklasik hata:
+
+    dbrh omega rel err ~ 0.011
+    dbrh h rel err     ~ 0.006
+    dbrh Twb abs err   ~ 0.0003 C
+    sat omega rel err  ~ 0.008
+    sat h rel err      ~ 0.007
+
+Bu hatalar kucuk grid cozumlemesi icindir. Cozumleme arttikca hata duser.
+Ancak nemli hava generator'u HAPropsSI nedeniyle nispeten yavas oldugu icin
+1000 x 1000 gibi cok buyuk gridler yerine once orta cozumleme denenmelidir.
+
+
+16. ONERILEN TAM GRID COZUMLEMESI
+---------------------------------
+
+Nemli hava 3D tablo oldugu icin dosya boyutu ve uretim suresi hizla artar.
+Baslangic icin onerilen makul degerler:
+
+    N_Tdb  = 81
+    N_RH   = 81
+    N_P    = 21
+    N_Tsat = 221
+
+Bu durumda dbrh nokta sayisi:
+
+    81 * 81 * 21 = 137781 nokta
+
+sat nokta sayisi:
+
+    221 * 21 = 4641 nokta
+
+Bu, yillik cooling tower simulasyonu icin genellikle yeterli bir baslangic
+cozumlemesidir.
+
+
+17. PRATIK KULLANIM OZETI
+-------------------------
+
+Weather/cache girdisi:
+
+    T_db_C, RH_pct, P_atm_Pa
+
+Giris hava ozellikleri:
+
+    RH = RH_pct/100
+    omega = dbrh.omega(Tdb,RH,P)
+    h_air_in = dbrh.h_Jkgda(Tdb,RH,P)
+    T_wb = dbrh.Twb_C(Tdb,RH,P)
+    v = dbrh.v_m3kgda(Tdb,RH,P)
+    rho_da = dbrh.rho_da_kgm3(Tdb,RH,P)
+    rho_ma = dbrh.rho_ma_kgm3(Tdb,RH,P)
+
+Doymus hava:
+
+    h_sat = sat.h_sat_Jkgda(Tsat,P)
+    omega_sat = sat.omega_sat(Tsat,P)
+    p_ws = sat.p_ws_Pa(Tsat,P)
+
+Air outlet:
+
+    h_target = h_air_in + Q_rejected/mdot_dry_air
+    T_air_out = inverse_sat_h(h_target,P)
+    omega_air_out = sat.omega_sat(T_air_out,P)
+
+Water consumption:
+
+    mdot_evap = mdot_dry_air * (omega_air_out - omega_air_in)
+
+CoolProp runtime cagrisi:
+
+    Gerekmez.
+
+
+18. SINIRLAR VE DIKKAT EDILECEKLER
+----------------------------------
+
+- V1 esas olarak Mersin EPW/cache sinirlari icin tasarlanmistir.
+- Baska lokasyon kullanilirsa generator ilgili EPW/cache ile yeniden
+  calistirilmalidir.
+- dbrh tablosu RH girdili calisma icin uygundur.
+- dbwb varsayilan olarak bos/kapalidir.
+- Doymus cikis havasi icin Tsat araligi sat tablosunun icinde kalmalidir.
+- HAPropsSI generator asamasinda yavas olabilir; runtime hiz kazanimi icin
+  bu maliyet bir kez odenir.
+- Backend dosyayi persistent yuklemelidir; her property isteginde .mat
+  dosyasini yeniden yuklemek performansi bozar.
+
+
+19. SONUC
+---------
+
+humidAirDB_v1, cooling tower nemli hava ozelliklerini runtime CoolProp
+cagrilarindan ayirmak icin hazirlanan dosya-tabanli altyapidir. Proje icin
+en kullanisli iki tablo:
+
+    dbrh : Tdb, RH, P -> giris hava ozellikleri
+    sat  : Tsat, P    -> doymus hava ozellikleri
+
+Sonraki uygulama adimi, ct_psychrometrics.m ve ct_air_outlet_state.m icine
+humidAirDB_v1 dosyasini okuyacak bir fluidgrid/filegrid backend eklemektir.

@@ -22,7 +22,12 @@ omega_in = resolve_omega(CTInput,'in');
 omega_out = resolve_omega(CTInput,'out');
 tower_active = getfield_default(CTInput,'tower_active',true);
 
-rho_w = CTConfig.water.rho_kgm3;
+T_w_C = getfield_default(CTInput,'T_w_C',NaN);
+if isfinite(T_w_C)
+    rho_w = ct_water_properties(T_w_C,CTConfig).rho_kgm3;
+else
+    rho_w = CTConfig.water.rho_kgm3;
+end
 drift_fraction = CTConfig.water_consumption.drift_fraction;
 COC = CTConfig.water_consumption.cycles_of_concentration;
 if isfield(CTConfig.water_consumption,'enabled') && ~CTConfig.water_consumption.enabled

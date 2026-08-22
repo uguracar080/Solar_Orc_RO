@@ -65,16 +65,18 @@ end
 Npar = max(1,round(PHDesign.N_parallel));
 geom = PHDesign.geometry;
 
-hotFlow = localFlowStruct(mdotHot/Npar,ThIn,PHConfig.hot);
-coldFlow = localFlowStruct(mdotCold/Npar,TcIn,PHConfig.cold);
+hotProps = localSideProps(PHConfig,'hot',ThIn);
+coldProps = localSideProps(PHConfig,'cold',TcIn);
+hotFlow = localFlowStruct(mdotHot/Npar,ThIn,hotProps);
+coldFlow = localFlowStruct(mdotCold/Npar,TcIn,coldProps);
 shell = preheater_sthe_core_v1('shell_singlephase',hotFlow,geom,orcConfig);
 tube = preheater_sthe_core_v1('tube_singlephase',coldFlow,geom,geom.Ltube);
 U = localOverallU(shell.h,tube.h);
 A = PHDesign.A_design_m2;
 UA = U*A;
 
-C_hot = mdotHot*PHConfig.hot.cp_JkgK;
-C_cold = mdotCold*PHConfig.cold.cp_JkgK;
+C_hot = mdotHot*hotProps.cp_JkgK;
+C_cold = mdotCold*coldProps.cp_JkgK;
 Cmin = min(C_hot,C_cold);
 Cmax = max(C_hot,C_cold);
 Cr = Cmin/Cmax;
@@ -152,6 +154,17 @@ flow.cp = props.cp_JkgK;
 flow.T_C = T_C;
 end
 
+function props = localSideProps(PHConfig,sideName,T_C)
+side = PHConfig.(sideName);
+fluid = localGet(side,'fluid','');
+useGrid = localGet(side,'useFluidGrid',false);
+if useGrid && localIsWater(fluid)
+    props = preheater_water_properties_v1(T_C,PHConfig);
+else
+    props = side;
+end
+end
+
 function cfg = localDefaults(cfg)
 cfg = localSetDefault(cfg,'dT_min_K',3.0);
 cfg = localSetDefault(cfg,'T_cold_rise_target_C',5.0);
@@ -166,6 +179,10 @@ cfg.hot = localSetDefault(cfg.hot,'cp_JkgK',4180);
 cfg.hot = localSetDefault(cfg.hot,'rho_kgm3',997);
 cfg.hot = localSetDefault(cfg.hot,'mu_Pas',8.9e-4);
 cfg.hot = localSetDefault(cfg.hot,'k_WmK',0.60);
+cfg.hot = localSetDefault(cfg.hot,'fluid','Water');
+cfg.hot = localSetDefault(cfg.hot,'useFluidGrid',true);
+cfg.hot = localSetDefault(cfg.hot,'gridFile','thermoDB_Water_V5.mat');
+cfg.hot = localSetDefault(cfg.hot,'P_Pa',2e5);
 if ~isfield(cfg,'cold') || isempty(cfg.cold)
     cfg.cold = struct();
 end
@@ -173,6 +190,8 @@ cfg.cold = localSetDefault(cfg.cold,'cp_JkgK',3990);
 cfg.cold = localSetDefault(cfg.cold,'rho_kgm3',1025);
 cfg.cold = localSetDefault(cfg.cold,'mu_Pas',1.05e-3);
 cfg.cold = localSetDefault(cfg.cold,'k_WmK',0.60);
+cfg.cold = localSetDefault(cfg.cold,'fluid','Seawater');
+cfg.cold = localSetDefault(cfg.cold,'useFluidGrid',false);
 end
 
 function out = localBlankOutput()
@@ -209,6 +228,11 @@ if isfield(S,fieldName) && ~isempty(S.(fieldName))
 else
     value = defaultValue;
 end
+end
+
+function tf = localIsWater(fluid)
+clean = lower(regexprep(char(string(fluid)),'[^a-zA-Z0-9]',''));
+tf = any(strcmp(clean,{'water','h2o'}));
 end
 
 function S = localSetDefault(S,fieldName,defaultValue)

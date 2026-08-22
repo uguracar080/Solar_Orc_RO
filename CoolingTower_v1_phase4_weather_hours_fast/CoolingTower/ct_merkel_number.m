@@ -42,7 +42,6 @@ if numel(CTAir.h_Jkgda) ~= 1
 end
 
 LoverG = resolve_L_over_G(CTInput);
-cp = CTConfig.water.cp_JkgK;
 Tw_in = CTInput.T_w_in_C;
 Twb = CTAir.T_wb_C;
 CTNumerics = CTConfig.numerics;
@@ -65,6 +64,7 @@ switch CTModeKey
             error('ct_merkel_number:MissingField','Forward mode requires CTInput.T_w_out_C.');
         end
         Tw_out = CTInput.T_w_out_C;
+        cp = ct_water_properties(0.5*(Tw_in + Tw_out),CTConfig).cp_JkgK;
         CTCalc = merkel_forward(Tw_out,Tw_in,CTAir.h_Jkgda,LoverG, ...
             CTInput.ambient.P_atm_Pa,cp,CTConfig);
         CTOutput = package_output(Tw_out,LoverG,CTAir,CTCalc);
@@ -78,6 +78,7 @@ switch CTModeKey
             error('ct_merkel_number:Me','CTInput.Me_available must be finite and nonnegative.');
         end
 
+        cp = ct_water_properties(Tw_in,CTConfig).cp_JkgK;
         T_lower = Twb + CTNumerics.min_approach_C;
         T_upper = Tw_in - 1e-4;
         CTCalcLow = merkel_forward(T_lower,Tw_in,CTAir.h_Jkgda,LoverG, ...

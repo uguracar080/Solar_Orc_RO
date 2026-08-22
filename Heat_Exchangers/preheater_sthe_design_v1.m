@@ -48,9 +48,15 @@ if TcOutTarget <= TcIn
     return
 end
 
-Qtotal = mdotCold*PHConfig.cold.cp_JkgK*(TcOutTarget - TcIn);
+hotProps = localSideProps(PHConfig,'hot',ThIn);
+coldProps = localSideProps(PHConfig,'cold',0.5*(TcIn + TcOutTarget));
+Qtotal = mdotCold*coldProps.cp_JkgK*(TcOutTarget - TcIn);
 dT1 = ThIn - TcOutTarget;
-ThOut = ThIn - Qtotal/(mdotHot*PHConfig.hot.cp_JkgK);
+ThOut = ThIn - Qtotal/(mdotHot*hotProps.cp_JkgK);
+for iter = 1:3
+    hotProps = localSideProps(PHConfig,'hot',0.5*(ThIn + ThOut));
+    ThOut = ThIn - Qtotal/(mdotHot*hotProps.cp_JkgK);
+end
 dT2 = ThOut - TcIn;
 if min([dT1,dT2]) < PHConfig.dT_min_K
     PHDesign.status = 'MIN_APPROACH_VIOLATED';
@@ -118,8 +124,10 @@ try
         return
     end
 
-    hotFlow = localFlowStruct(mdotHot/Npar,0.5*(ThIn+ThOut),PHConfig.hot);
-    coldFlow = localFlowStruct(mdotCold/Npar,0.5*(TcIn+TcOut),PHConfig.cold);
+    hotT = 0.5*(ThIn + ThOut);
+    coldT = 0.5*(TcIn + TcOut);
+    hotFlow = localFlowStruct(mdotHot/Npar,hotT,localSideProps(PHConfig,'hot',hotT));
+    coldFlow = localFlowStruct(mdotCold/Npar,coldT,localSideProps(PHConfig,'cold',coldT));
 
     shell0 = preheater_sthe_core_v1('shell_singlephase',hotFlow,geom0,orcConfig);
     tube0 = preheater_sthe_core_v1('tube_singlephase',coldFlow,geom0,NaN);
@@ -168,6 +176,17 @@ flow.cp = props.cp_JkgK;
 flow.T_C = T_C;
 end
 
+function props = localSideProps(PHConfig,sideName,T_C)
+side = PHConfig.(sideName);
+fluid = localGet(side,'fluid','');
+useGrid = localGet(side,'useFluidGrid',false);
+if useGrid && localIsWater(fluid)
+    props = preheater_water_properties_v1(T_C,PHConfig);
+else
+    props = side;
+end
+end
+
 function cfg = localDefaults(cfg)
 cfg = localSetDefault(cfg,'dT_min_K',3.0);
 cfg = localSetDefault(cfg,'T_cold_out_design_C',25.0);
@@ -185,6 +204,10 @@ cfg.hot = localSetDefault(cfg.hot,'cp_JkgK',4180);
 cfg.hot = localSetDefault(cfg.hot,'rho_kgm3',997);
 cfg.hot = localSetDefault(cfg.hot,'mu_Pas',8.9e-4);
 cfg.hot = localSetDefault(cfg.hot,'k_WmK',0.60);
+cfg.hot = localSetDefault(cfg.hot,'fluid','Water');
+cfg.hot = localSetDefault(cfg.hot,'useFluidGrid',true);
+cfg.hot = localSetDefault(cfg.hot,'gridFile','thermoDB_Water_V5.mat');
+cfg.hot = localSetDefault(cfg.hot,'P_Pa',2e5);
 if ~isfield(cfg,'cold') || isempty(cfg.cold)
     cfg.cold = struct();
 end
@@ -192,6 +215,8 @@ cfg.cold = localSetDefault(cfg.cold,'cp_JkgK',3990);
 cfg.cold = localSetDefault(cfg.cold,'rho_kgm3',1025);
 cfg.cold = localSetDefault(cfg.cold,'mu_Pas',1.05e-3);
 cfg.cold = localSetDefault(cfg.cold,'k_WmK',0.60);
+cfg.cold = localSetDefault(cfg.cold,'fluid','Seawater');
+cfg.cold = localSetDefault(cfg.cold,'useFluidGrid',false);
 end
 
 function D = localBlankDesign()
@@ -246,6 +271,11 @@ if isfield(S,fieldName) && ~isempty(S.(fieldName))
 else
     value = defaultValue;
 end
+end
+
+function tf = localIsWater(fluid)
+clean = lower(regexprep(char(string(fluid)),'[^a-zA-Z0-9]',''));
+tf = any(strcmp(clean,{'water','h2o'}));
 end
 
 function S = localSetDefault(S,fieldName,defaultValue)
