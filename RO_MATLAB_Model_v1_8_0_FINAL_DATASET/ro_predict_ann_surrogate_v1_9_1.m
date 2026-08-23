@@ -72,6 +72,14 @@ Cp = min(Models.Cp.CpLimit_mgL,max(0.0,Cp));
 Qp  = Qf .* R;
 SEC = W ./ Qp;
 
+%% Diagnostic raw outputs before feasibility masking
+RawQp  = Qp;
+RawW   = W;
+RawSEC = SEC;
+RawCp  = Cp;
+RawP1  = P1;
+RawP2  = P2;
+
 %% Reject infeasible or out-of-domain points
 W(~Feasible)   = NaN;
 P1(~Feasible)  = NaN;
@@ -81,11 +89,13 @@ Qp(~Feasible)  = NaN;
 SEC(~Feasible) = NaN;
 
 Out = table(Qf,T,Cf,R,InTrainingDomain,pValid,ClassifierFeasible,Feasible, ...
-    Qp,W,SEC,Cp,P1,P2,pCpActive, ...
+    Qp,W,SEC,Cp,P1,P2,pCpActive,RawQp,RawW,RawSEC,RawCp,RawP1,RawP2, ...
     'VariableNames',{'Qf_train_m3h','T_RO_in_C','Cf_kg_m3','R_target', ...
     'InTrainingDomain','P_feasible','ClassifierFeasible','Feasible', ...
     'Qp_train_m3h','W_RO_train_kW','SEC_kWh_m3','Cp_mg_L', ...
-    'P1_opt_gauge_MPa','P2_opt_gauge_MPa','P_CpBoundary'});
+    'P1_opt_gauge_MPa','P2_opt_gauge_MPa','P_CpBoundary', ...
+    'Raw_Qp_train_m3h','Raw_W_RO_train_kW','Raw_SEC_kWh_m3','Raw_Cp_mg_L', ...
+    'Raw_P1_opt_gauge_MPa','Raw_P2_opt_gauge_MPa'});
 end
 
 function v = expand_scalar(v,n)

@@ -49,8 +49,9 @@ try
     field = SolarConfig.field;
     ptc = SolarConfig.ptc;
 
+    solverCacheIn = localGet(SolarInput,'solver_cache',struct());
     ptcField = localSolveFieldSeriesParallel(inPTC,ptc,field, ...
-        SolarConfig.Nusselt_multiplier,SolarConfig.sigma,opts);
+        SolarConfig.Nusselt_multiplier,SolarConfig.sigma,opts,solverCacheIn);
 
     SolarOut.T_HTF_out_K = ptcField.Th_out_K;
     SolarOut.mdot_HTF_kg_s = ptcField.mdot_hot_kg_s;
@@ -60,6 +61,7 @@ try
     SolarOut.N_series = field.N_series;
     SolarOut.N_parallel = field.N_parallel;
     SolarOut.ptc_field = ptcField;
+    SolarOut.solver_cache = ptcField.solver_cache;
     SolarOut.feasible = SolarOut.Q_useful_W > SolarConfig.min_useful_heat_W;
     if SolarOut.feasible
         SolarOut.status = 'OK';
@@ -135,6 +137,7 @@ out.feasible = false;
 out.status = 'UNINITIALIZED';
 out.message = '';
 out.ptc_field = struct();
+out.solver_cache = struct();
 end
 
 function opts = localFsolveOptions()
@@ -146,7 +149,7 @@ else
 end
 end
 
-function ptcField = localSolveFieldSeriesParallel(inPTC,ptc,field,R,sigma,opts)
+function ptcField = localSolveFieldSeriesParallel(inPTC,ptc,field,R,sigma,opts,solverCacheIn)
 Np = field.N_parallel;
 Ns = field.N_series;
 TinString_K = inPTC.Tin_K;
@@ -155,8 +158,10 @@ QuString_W = 0;
 dPString_Pa = 0;
 ToutLast_K = TinNow_K;
 x0Prev = [];
+moduleGuess = localModuleInitialGuesses(solverCacheIn,Ns);
 
 lastModule = struct('mdot_kg_s',0);
+moduleSolution = nan(3,Ns);
 for k = 1:Ns
     in = struct();
     in.Gb = inPTC.Gb_Wm2;
@@ -165,7 +170,12 @@ for k = 1:Ns
     in.Tin = TinNow_K;
     in.V_Lmin = inPTC.V_Lmin_1module;
 
-    if isempty(x0Prev)
+    if all(isfinite(moduleGuess(:,k)))
+        x0Use = moduleGuess(:,k);
+        x0Use(1) = max(x0Use(1),in.Tin);
+        x0Use(3) = max(x0Use(3),in.Tin + 0.5);
+        x0Use(2) = min(max(x0Use(2),in.Tam),x0Use(1));
+    elseif isempty(x0Prev)
         x0Use = [];
     else
         x0Use = x0Prev;
@@ -180,6 +190,7 @@ for k = 1:Ns
     QuString_W = QuString_W + lastModule.Qu_W;
     dPString_Pa = dPString_Pa + lastModule.dP_abs_Pa;
     x0Prev = [lastModule.Tr_K; lastModule.Tc_K; lastModule.Tout_K];
+    moduleSolution(:,k) = x0Prev;
 end
 
 ptcField = struct();
@@ -193,6 +204,22 @@ ptcField.Np = Np;
 ptcField.Gb_Wm2 = inPTC.Gb_Wm2;
 ptcField.Aa_m2 = ptc.Aa;
 ptcField.Aa_total_m2 = ptc.Aa * Ns * Np;
+ptcField.solver_cache = struct('module_solution',moduleSolution, ...
+    'N_series',Ns,'N_parallel',Np,'V_Lmin_1module',inPTC.V_Lmin_1module, ...
+    'DNI_Wm2',inPTC.Gb_Wm2,'T_in_K',TinString_K,'T_out_K',ToutLast_K);
+end
+
+function moduleGuess = localModuleInitialGuesses(solverCacheIn,Ns)
+moduleGuess = nan(3,Ns);
+if ~isstruct(solverCacheIn) || ~isfield(solverCacheIn,'module_solution')
+    return
+end
+candidate = solverCacheIn.module_solution;
+if ~isnumeric(candidate) || size(candidate,1) ~= 3
+    return
+end
+nUse = min(Ns,size(candidate,2));
+moduleGuess(:,1:nUse) = candidate(:,1:nUse);
 end
 
 function out = localSolveSingleModule(in,ptc,R,sigma,opts,x0In)

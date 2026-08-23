@@ -33,10 +33,16 @@ fprintf(fid,'=============\n');
 localPrintStatusCounts(fid,Hourly,'system_status');
 localPrintStatusCounts(fid,Hourly,'orc_status');
 localPrintStatusCounts(fid,Hourly,'solar_flow_status');
+localPrintStatusCounts(fid,Hourly,'solar_flow_search_status');
 localPrintStatusCounts(fid,Hourly,'storage_status');
 localPrintStatusCounts(fid,Hourly,'preheater_status');
 localPrintStatusCounts(fid,Hourly,'ct_status');
 localPrintStatusCounts(fid,Hourly,'ro_status');
+localPrintStatusCounts(fid,Hourly,'orc_off_reason');
+
+fprintf(fid,'\nRUNTIME PROFILE\n');
+fprintf(fid,'===============\n');
+localPrintRuntimeProfile(fid,Summary);
 
 fprintf(fid,'\nKEY DESIGN RESULTS\n');
 fprintf(fid,'==================\n');
@@ -50,6 +56,7 @@ fprintf(fid,'hourly_csv  : %s\n',localGetNested(cfg,'outputs','hourly_csv',''));
 fprintf(fid,'summary_csv : %s\n',localGetNested(cfg,'outputs','summary_csv',''));
 fprintf(fid,'summary_mat : %s\n',localGetNested(cfg,'outputs','summary_mat',''));
 fprintf(fid,'report_txt  : %s\n',ReportFile);
+fprintf(fid,'run_dir     : %s\n',localGetNested(cfg,'outputs','run_dir',''));
 fprintf(fid,'figures_dir : %s\n',localGetNested(cfg,'outputs','figures_dir',''));
 end
 
@@ -77,6 +84,16 @@ end
 names = T.Properties.VariableNames;
 for i = 1:numel(names)
     fprintf(fid,'%s = %s\n',names{i},localValueToText(T.(names{i})(1)));
+end
+end
+
+function localPrintRuntimeProfile(fid,Summary)
+names = Summary.Properties.VariableNames;
+for i = 1:numel(names)
+    name = names{i};
+    if startsWith(name,'runtime_')
+        fprintf(fid,'%s = %s\n',name,localValueToText(Summary.(name)(1)));
+    end
 end
 end
 

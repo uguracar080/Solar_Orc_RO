@@ -2,7 +2,8 @@
 % Script entry point for the first integrated Solar-ORC-RO configuration.
 %
 % Edit the block below, then press Run in MATLAB.
-
+clear all
+clc
 ProjectRoot = fileparts(fileparts(mfilename('fullpath')));
 system_paths_v1(ProjectRoot);
 cfg = system_config_v1(ProjectRoot);
@@ -20,6 +21,7 @@ cfg.solar.T_HTF_in_K = 380.0;
 cfg.solar.V_Lmin_1module = 56.8;
 cfg.solar.V_Lmin_1module_reference = 56.8;
 cfg.solar.min_DNI_Wm2 = 50;
+cfg.solar.min_deltaT_gain_K = 5.0;
 cfg.solar.flow_control.enabled = true;
 cfg.solar.flow_control.factor_list = 0.50:0.25:2.00;
 cfg.solar.flow_control.selection_mode = 'max_heat_below_limit';
@@ -36,22 +38,24 @@ cfg.orc.eta_turb = 0.85;
 cfg.orc.eta_pump = 0.80;
 cfg.orc.W_net_design_W = 250e3;
 cfg.orc.P_evap_design_Pa = 10.7e5;
-cfg.orc.P_cond_design_Pa = 1.2e5;
-cfg.orc.hot_stream_design_T_in_K = 150 + 273.15; %160
-cfg.orc.hot_stream_design_T_return_K = 130 + 273.15; %115
+cfg.orc.P_cond_design_Pa = 2.0e5;
+cfg.orc.hot_stream_design_T_in_K = 160 + 273.15;
+cfg.orc.hot_stream_design_T_return_K = 115 + 273.15;
 cfg.orc.hot_stream_fluid = 'Syltherm800';
 cfg.orc.hot_stream_design_mdot_kg_s = 30.0;
-cfg.orc.cw_target_in_C = 15.0;
+cfg.orc.cw_target_in_C = 27.0;
 cfg.orc.mdot_cw_design_kg_s = 100.0;
+cfg.ct.T_cw_target_C = cfg.orc.cw_target_in_C;
 
 % Heat rejection and RO variables.
 cfg.ro.N_train_total = 1;
 cfg.preheater.T_RO_in_rise_C = 5.0;
+cfg.preheater.T_RO_in_min_C = 20.0;
 cfg.preheater.N_parallel_max = 20;
 cfg.preheater.Nt_min = 20;
 cfg.preheater.Nt_max = 1200;
 cfg.preheater.Nt_step = 20;
-cfg.ct.Q_rated_fraction_of_design_condenser = 0.30;
+cfg.ct.Q_rated_fraction_of_design_condenser = 1.00;
 
 % Temporary thermal storage placeholder for excess solar heat.
 % This is a water-tank bookkeeping model; PCM charge/discharge logic is not active yet.
@@ -63,4 +67,8 @@ cfg.storage.T_min_C = 25.0;
 cfg.storage.T_max_C = 95.0;
 cfg.storage.solar_return_sink_enabled = true;
 
+runTimer = tic;
 Results = run_single_configuration_core_v1(cfg);
+elapsed_s = toc(runTimer);
+fprintf('\nTotal simulation wall time: %.1f s (%.2f min, %.2f h)\n', ...
+    elapsed_s, elapsed_s/60, elapsed_s/3600);
