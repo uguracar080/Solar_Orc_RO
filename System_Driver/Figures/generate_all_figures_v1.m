@@ -6,9 +6,9 @@ if nargin < 2 || isempty(figuresRoot)
             isfield(Results.cfg.outputs,'figures_root')
         figuresRoot = Results.cfg.outputs.figures_root;
     elseif isfield(Results,'cfg') && isfield(Results.cfg,'project_root')
-        figuresRoot = fullfile(Results.cfg.project_root,'Figures');
+        figuresRoot = fullfile(Results.cfg.project_root,'Results');
     else
-        figuresRoot = fullfile(pwd,'Figures');
+        figuresRoot = fullfile(pwd,'Results');
     end
 end
 

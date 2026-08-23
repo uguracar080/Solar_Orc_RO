@@ -19,7 +19,7 @@ Paths.Weather = fullfile(ProjectRoot,'Weather');
 Paths.Seawater = fullfile(ProjectRoot,'Hourly_profiles_seawater');
 Paths.RO = fullfile(ProjectRoot,'RO_MATLAB_Model_v1_8_0_FINAL_DATASET');
 Paths.Results = fullfile(ProjectRoot,'Results');
-Paths.Figures = fullfile(ProjectRoot,'Figures');
+Paths.Figures = fullfile(Paths.SystemDriver,'Figures');
 
 addpath(Paths.SystemDriver,'-begin');
 addpath(Paths.SolarField,'-begin');
@@ -34,8 +34,5 @@ addpath(Paths.Figures,'-begin');
 
 if ~isfolder(Paths.Results)
     mkdir(Paths.Results);
-end
-if ~isfolder(Paths.Figures)
-    mkdir(Paths.Figures);
 end
 end

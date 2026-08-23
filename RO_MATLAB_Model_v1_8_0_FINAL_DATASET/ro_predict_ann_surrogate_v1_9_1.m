@@ -12,9 +12,12 @@ function Out = ro_predict_ann_surrogate_v1_9_1(ModelFile, Qf_train_m3h, T_RO_in_
 %   Cf       : 38.5 to 41.5 kg/m3
 %   R_target : 0.399 to 0.571
 %
-% Feasibility is evaluated first using the threshold stored in the trained
-% model file. Qp and SEC are then calculated from physical identities rather
-% than learned as independent ANN outputs.
+% Feasibility is evaluated using the threshold stored in the trained model
+% file. Boundary points whose product salinity lands exactly on the 500 mg/L
+% specification are allowed through a conservative physical guard, because
+% the deployment classifier can otherwise reject valid constraint-active
+% points. Qp and SEC are calculated from physical identities rather than
+% learned as independent ANN outputs.
 
 if nargin < 1 || strlength(string(ModelFile)) == 0
     ModelFile = 'RO_ANN_models_v1_9_1.mat';
@@ -54,7 +57,6 @@ InTrainingDomain = ...
 %% Feasibility classifier
 pValid = classifier_probability_local(Models.Feasibility,X);
 ClassifierFeasible = pValid >= Models.Feasibility.Threshold;
-Feasible = InTrainingDomain & ClassifierFeasible;
 
 %% Performance regressors
 W  = regressor_predict_local(Models.Regressors.W_RO_train_kW,X);
@@ -80,6 +82,20 @@ RawCp  = Cp;
 RawP1  = P1;
 RawP2  = P2;
 
+%% Constraint-active product-quality boundary guard
+Boundary = local_boundary_guard_defaults();
+RawPerformanceFinite = isfinite(RawQp) & isfinite(RawW) & isfinite(RawSEC) & ...
+    isfinite(RawCp) & isfinite(RawP1) & isfinite(RawP2);
+RawPerformancePhysical = RawQp > 0 & RawW > 0 & RawSEC > 0 & ...
+    RawP1 >= Boundary.P_min_gauge_MPa & RawP2 >= Boundary.P_min_gauge_MPa & ...
+    RawP1 <= Boundary.P_max_gauge_MPa & RawP2 <= Boundary.P_max_gauge_MPa;
+ProductQualityOk = RawCp <= Models.Cp.CpLimit_mgL + Boundary.Cp_tol_mgL;
+CpBoundaryActive = pCpActive >= Models.Cp.SwitchThreshold;
+BoundaryFeasibleOverride = InTrainingDomain & ~ClassifierFeasible & ...
+    CpBoundaryActive & ProductQualityOk & RawPerformanceFinite & RawPerformancePhysical;
+
+Feasible = InTrainingDomain & (ClassifierFeasible | BoundaryFeasibleOverride);
+
 %% Reject infeasible or out-of-domain points
 W(~Feasible)   = NaN;
 P1(~Feasible)  = NaN;
@@ -88,10 +104,12 @@ Cp(~Feasible)  = NaN;
 Qp(~Feasible)  = NaN;
 SEC(~Feasible) = NaN;
 
-Out = table(Qf,T,Cf,R,InTrainingDomain,pValid,ClassifierFeasible,Feasible, ...
+Out = table(Qf,T,Cf,R,InTrainingDomain,pValid,ClassifierFeasible, ...
+    BoundaryFeasibleOverride,Feasible, ...
     Qp,W,SEC,Cp,P1,P2,pCpActive,RawQp,RawW,RawSEC,RawCp,RawP1,RawP2, ...
     'VariableNames',{'Qf_train_m3h','T_RO_in_C','Cf_kg_m3','R_target', ...
-    'InTrainingDomain','P_feasible','ClassifierFeasible','Feasible', ...
+    'InTrainingDomain','P_feasible','ClassifierFeasible', ...
+    'BoundaryFeasibleOverride','Feasible', ...
     'Qp_train_m3h','W_RO_train_kW','SEC_kWh_m3','Cp_mg_L', ...
     'P1_opt_gauge_MPa','P2_opt_gauge_MPa','P_CpBoundary', ...
     'Raw_Qp_train_m3h','Raw_W_RO_train_kW','Raw_SEC_kWh_m3','Raw_Cp_mg_L', ...
@@ -116,4 +134,11 @@ function y = regressor_predict_local(M,X)
 Xn = (double(X)-M.MuX)./M.SigX;
 y = (M.Net(Xn.').' .* M.SigY) + M.MuY;
 y = double(y(:));
+end
+
+function Boundary = local_boundary_guard_defaults()
+Boundary = struct();
+Boundary.Cp_tol_mgL = 1.0e-6;
+Boundary.P_min_gauge_MPa = 0.0;
+Boundary.P_max_gauge_MPa = 8.30;
 end

@@ -139,5 +139,5 @@ cfg.outputs.summary_csv = fullfile(cfg.outputs.results_root,'single_config_v1_su
 cfg.outputs.summary_mat = fullfile(cfg.outputs.results_root,'single_config_v1_summary.mat');
 cfg.outputs.report_txt = fullfile(cfg.outputs.results_root,'single_config_v1_report.txt');
 cfg.outputs.generate_figures = true;
-cfg.outputs.figures_root = fullfile(ProjectRoot,'Figures');
+cfg.outputs.figures_root = '';
 end

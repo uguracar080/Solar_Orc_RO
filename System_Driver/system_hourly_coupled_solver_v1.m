@@ -35,7 +35,7 @@ Q_solar_curtailed_W = zeros(nHours,1);
 storage_SOC = nan(nHours,1);
 storage_T_C = nan(nHours,1);
 storage_E_stored_kWh = nan(nHours,1);
-solar_flow_factor = ones(nHours,1);
+solar_flow_factor = nan(nHours,1);
 solar_V_Lmin_1module = nan(nHours,1);
 W_solar_pump_W = zeros(nHours,1);
 dP_solar_field_Pa = zeros(nHours,1);
@@ -71,6 +71,7 @@ W_RO_total_W = zeros(nHours,1);
 Qp_total_m3h = zeros(nHours,1);
 RO_InTrainingDomain = false(nHours,1);
 RO_ClassifierFeasible = false(nHours,1);
+RO_BoundaryFeasibleOverride = false(nHours,1);
 RO_ANN_Feasible = false(nHours,1);
 RO_P_feasible = nan(nHours,1);
 RO_Qp_train_m3h = nan(nHours,1);
@@ -216,6 +217,7 @@ for it = 1:nHours
     Qp_total_m3h(it) = State.Qp_total_m3h;
     RO_InTrainingDomain(it) = State.RO_InTrainingDomain;
     RO_ClassifierFeasible(it) = State.RO_ClassifierFeasible;
+    RO_BoundaryFeasibleOverride(it) = State.RO_BoundaryFeasibleOverride;
     RO_ANN_Feasible(it) = State.RO_ANN_Feasible;
     RO_P_feasible(it) = State.RO_P_feasible;
     RO_Qp_train_m3h(it) = State.RO_Qp_train_m3h;
@@ -276,7 +278,8 @@ Hourly = table(hour,source_hour,DNI_Whm2,T_amb_C,T_wb_C,T_sw_raw_C,Cf_kg_m3, ...
     DeltaT_preheater_available_K,preheater_on,Q_preheater_W,T_RO_in_C,T_cw_after_preheater_C, ...
     T_CT_out_C,W_CT_fan_W,Q_CT_rejected_W,CT_makeup_m3h,CT_mdot_makeup_kg_s, ...
     W_available_for_RO_W,N_train_total,N_train_running,W_RO_total_W,Qp_total_m3h, ...
-    RO_InTrainingDomain,RO_ClassifierFeasible,RO_ANN_Feasible,RO_P_feasible, ...
+    RO_InTrainingDomain,RO_ClassifierFeasible,RO_BoundaryFeasibleOverride, ...
+    RO_ANN_Feasible,RO_P_feasible, ...
     RO_Qp_train_m3h,RO_W_train_kW,RO_SEC_kWh_m3,RO_Cp_mg_L, ...
     RO_P1_opt_gauge_MPa,RO_P2_opt_gauge_MPa,RO_P_CpBoundary, ...
     RO_raw_Qp_train_m3h,RO_raw_W_train_kW,RO_raw_SEC_kWh_m3,RO_raw_Cp_mg_L, ...
@@ -382,6 +385,7 @@ State.W_RO_total_W = Dispatch.W_RO_total_W;
 State.Qp_total_m3h = Dispatch.Qp_total_m3h;
 State.RO_InTrainingDomain = Dispatch.RO_InTrainingDomain;
 State.RO_ClassifierFeasible = Dispatch.RO_ClassifierFeasible;
+State.RO_BoundaryFeasibleOverride = Dispatch.RO_BoundaryFeasibleOverride;
 State.RO_ANN_Feasible = Dispatch.RO_ANN_Feasible;
 State.RO_P_feasible = Dispatch.RO_P_feasible;
 State.RO_Qp_train_m3h = Dispatch.RO_Qp_train_m3h;
@@ -862,6 +866,8 @@ State.system_status = "SYSTEM_OFF_SOLAR_OFF";
 State.orc_status = "skipped-solar-off";
 State.ro_status = "SKIPPED_SOLAR_OFF";
 State.SolarSearchState = localBlankSolarSearchState();
+State.solar_flow_factor = NaN;
+State.solar_flow_status = "SOLAR_OFF";
 State.solar_flow_search_status = "SOLAR_OFF_RESET";
 State.solar_flow_candidates_evaluated = 0;
 State.solar_flow_full_search_used = false;
@@ -1051,7 +1057,7 @@ State.cw_residual_K = NaN;
 State.PHWasOn = logical(PHWasOn);
 State.orc_status = "";
 State.ro_status = "RO_OFF";
-State.solar_flow_factor = 1;
+State.solar_flow_factor = NaN;
 State.solar_flow_status = "UNINITIALIZED";
 State.solar_flow_search_status = "UNINITIALIZED";
 State.solar_flow_candidates_evaluated = 0;
@@ -1088,6 +1094,7 @@ end
 function S = localResetRoDiagnostics(S)
 S.RO_InTrainingDomain = false;
 S.RO_ClassifierFeasible = false;
+S.RO_BoundaryFeasibleOverride = false;
 S.RO_ANN_Feasible = false;
 S.RO_P_feasible = NaN;
 S.RO_Qp_train_m3h = NaN;
@@ -1108,6 +1115,7 @@ end
 function cand = localAttachRoDiagnostics(cand,ROOut)
 cand.RO_InTrainingDomain = logical(ROOut.InTrainingDomain(1));
 cand.RO_ClassifierFeasible = logical(ROOut.ClassifierFeasible(1));
+cand.RO_BoundaryFeasibleOverride = logical(ROOut.BoundaryFeasibleOverride(1));
 cand.RO_ANN_Feasible = logical(ROOut.Feasible(1));
 cand.RO_P_feasible = ROOut.P_feasible(1);
 cand.RO_Qp_train_m3h = ROOut.Qp_train_m3h(1);

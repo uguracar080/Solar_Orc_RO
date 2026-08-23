@@ -11,7 +11,7 @@ cfg = system_config_v1(ProjectRoot);
 % Simulation window uses 0-based source hours and a half-open interval.
 % Examples: 0 to 8760 runs the full year; 5500 to 5548 runs 48 hours.
 cfg.sim.startHour = 0;
-cfg.sim.endHour = 48;
+cfg.sim.endHour = 72;
 cfg.sim.timeStep_min = 60;
 
 % Solar field design/operation variables.
@@ -48,7 +48,7 @@ cfg.orc.mdot_cw_design_kg_s = 100.0;
 cfg.ct.T_cw_target_C = cfg.orc.cw_target_in_C;
 
 % Heat rejection and RO variables.
-cfg.ro.N_train_total = 1;
+cfg.ro.N_train_total = 10;
 cfg.preheater.T_RO_in_rise_C = 5.0;
 cfg.preheater.T_RO_in_min_C = 20.0;
 cfg.preheater.N_parallel_max = 20;

@@ -136,8 +136,8 @@ Summary.Solar_curtailed_heat_kWh = sum(Hourly.Q_solar_curtailed_W,'omitnan')*dt_
 Summary.Storage_final_SOC = Hourly.storage_SOC(end);
 Summary.Storage_final_T_C = Hourly.storage_T_C(end);
 Summary.Solar_flow_factor_mean = mean(Hourly.solar_flow_factor,'omitnan');
-Summary.Solar_flow_factor_min = min(Hourly.solar_flow_factor);
-Summary.Solar_flow_factor_max = max(Hourly.solar_flow_factor);
+Summary.Solar_flow_factor_min = min(Hourly.solar_flow_factor,[],'omitnan');
+Summary.Solar_flow_factor_max = max(Hourly.solar_flow_factor,[],'omitnan');
 Summary.RO_domain_fail_hours = sum(Hourly.system_status == "RO_DOMAIN_FAIL")*dt_h;
 Summary.RO_infeasible_hours = sum(Hourly.system_status == "RO_INFEASIBLE")*dt_h;
 Summary.Power_deficit_hours = sum(Hourly.system_status == "POWER_DEFICIT")*dt_h;

@@ -101,7 +101,7 @@ PCM files remain in the repository for later integration. The active V1 storage 
   - If `cfg.storage.solar_return_sink_enabled = true`, the temporary storage layer can also act as a solar-loop return heat sink: ORC hot-side outlet heat above the current solar-field inlet temperature is charged to storage so the closed solar loop can return to the collector inlet condition. This is a placeholder for the later PCM charge/bypass controller.
   - Current default volume is `cfg.storage.volume_m3 = 100`; this is an editable placeholder, not a final design value.
 
-- `Figures/`
+- `System_Driver/Figures/`
   - Post-processing figure functions for V1 results.
   - Master function:
     - `generate_all_figures_v1.m`
@@ -110,8 +110,8 @@ PCM files remain in the repository for later integration. The active V1 storage 
     - `fig_water_balance_v1.m`
     - `fig_temperatures_v1.m`
     - `fig_status_counts_v1.m`
-  - Runtime figure outputs are written under `Figures/generated_figures/figures_YYYYMMDD_HHMMSS/` and saved as `.png` plus `.fig` files.
-  - `Figures/generated_figures/` is ignored by git; the versioned `Figures/` folder should contain only figure-generation code.
+  - Runtime figure outputs are written under each run folder as `Results/run_.../generated_figures/figures_YYYYMMDD_HHMMSS/` and saved as `.png` plus `.fig` files.
+  - The versioned `System_Driver/Figures/` folder should contain only figure-generation code.
 
 ### Input-data folders
 
@@ -390,8 +390,8 @@ Planned outputs:
 - `Results/single_config_v1_summary.csv`
 - `Results/single_config_v1_summary.mat`
 - `Results/single_config_v1_report.txt`
-- `Figures/figures_YYYYMMDD_HHMMSS/*.png`
-- `Figures/figures_YYYYMMDD_HHMMSS/*.fig`
+- `Results/run_.../generated_figures/figures_YYYYMMDD_HHMMSS/*.png`
+- `Results/run_.../generated_figures/figures_YYYYMMDD_HHMMSS/*.fig`
 
 The text report writes the full run input struct, summary results, status counts, key ORC/preheater/cooling-tower design values, and output-file locations. The complete hourly time series remains in the hourly CSV.
 
@@ -503,7 +503,7 @@ Current agreed order:
 - Latest 24-hour script smoke test results: 12 ORC operating hours, 8 RO operating hours, `1539.7 kWh` ORC net electricity, `852.59 kWh` RO electricity, `211.2 m3` RO product water, `11.527 m3` CT makeup water, and `199.67 m3` net product water.
 - Latest 24-hour status counts: 12 `ORC_OFF`, 4 `POWER_DEFICIT`, and 8 `CT_TARGET_NOT_MET`.
 - Split the preheater STHE implementation fully away from direct ORC helper calls. `preheater_sthe_design_v1.m` and `preheater_sthe_rating_v1.m` now call `preheater_sthe_core_v1.m`, which contains the local copied ORC_v23 single-phase STHE geometry, shell-side, and tube-side core.
-- Added `Figures/` post-processing functions. `generate_all_figures_v1.m` creates a timestamped figure output folder and calls separate figure functions for power balance, water balance, temperatures, and status counts.
+- Added `System_Driver/Figures/` post-processing functions. `generate_all_figures_v1.m` creates a timestamped figure output folder under the active run directory and calls separate figure functions for power balance, water balance, temperatures, and status counts.
 - Added `Results/single_config_v1_report.txt` generation through `write_simulation_report_v1.m`; the report records all `cfg` inputs, summary outputs, status counts, key design values, and output paths.
 - Confirmed in a 1-hour daylight smoke test at `source_hour=4331` that Stage-2 ORC operation can produce below the installed/design value: design is `250 kW`, while the hour produced `190.25 kW` net under the current boundary conditions.
 - Current CT limitation note: V1 flags `CT_TARGET_NOT_MET` when the fixed 30% CT capacity cannot return the condenser loop to target. The next coupling step is to feed that CT limitation back to the ORC condenser boundary condition and allow condenser pressure/inlet temperature to move before final hourly ORC/RO production is accepted.

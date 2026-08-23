@@ -150,6 +150,13 @@ cfg.outputs.hourly_csv = fullfile(runDir,'single_config_v1_hourly.csv');
 cfg.outputs.summary_csv = fullfile(runDir,'single_config_v1_summary.csv');
 cfg.outputs.summary_mat = fullfile(runDir,'single_config_v1_summary.mat');
 cfg.outputs.report_txt = fullfile(runDir,'single_config_v1_report.txt');
+
+legacyFiguresRoot = fullfile(cfg.project_root,'Figures');
+figuresRoot = localGetStruct(cfg.outputs,'figures_root','');
+if isempty(figuresRoot) || strcmp(char(string(figuresRoot)),legacyFiguresRoot)
+    figuresRoot = runDir;
+end
+cfg.outputs.figures_root = figuresRoot;
 end
 
 function runDir = localUniqueRunDir(rootDir,baseName)
@@ -472,8 +479,8 @@ Summary.Solar_curtailed_heat_kWh = sum(Hourly.Q_solar_curtailed_W,'omitnan')*dt_
 Summary.Storage_final_SOC = Hourly.storage_SOC(end);
 Summary.Storage_final_T_C = Hourly.storage_T_C(end);
 Summary.Solar_flow_factor_mean = mean(Hourly.solar_flow_factor,'omitnan');
-Summary.Solar_flow_factor_min = min(Hourly.solar_flow_factor);
-Summary.Solar_flow_factor_max = max(Hourly.solar_flow_factor);
+Summary.Solar_flow_factor_min = min(Hourly.solar_flow_factor,[],'omitnan');
+Summary.Solar_flow_factor_max = max(Hourly.solar_flow_factor,[],'omitnan');
 Summary.RO_domain_fail_hours = sum(Hourly.system_status == "RO_DOMAIN_FAIL")*dt_h;
 Summary.RO_infeasible_hours = sum(Hourly.system_status == "RO_INFEASIBLE")*dt_h;
 Summary.Power_deficit_hours = sum(Hourly.system_status == "POWER_DEFICIT")*dt_h;
@@ -507,6 +514,9 @@ if any(strcmp(Hourly.Properties.VariableNames,'RO_P_feasible'))
     Summary.RO_ANN_attempt_hours = sum(roAttempt);
     Summary.RO_ANN_domain_pass_hours = sum(Hourly.RO_InTrainingDomain(roAttempt));
     Summary.RO_ANN_classifier_feasible_hours = sum(Hourly.RO_ClassifierFeasible(roAttempt));
+    if any(strcmp(Hourly.Properties.VariableNames,'RO_BoundaryFeasibleOverride'))
+        Summary.RO_ANN_boundary_override_hours = sum(Hourly.RO_BoundaryFeasibleOverride(roAttempt));
+    end
     Summary.RO_ANN_P_feasible_mean = mean(Hourly.RO_P_feasible(roAttempt),'omitnan');
     Summary.RO_ANN_P_feasible_min = min(Hourly.RO_P_feasible(roAttempt),[],'omitnan');
     Summary.RO_ANN_P_feasible_max = max(Hourly.RO_P_feasible(roAttempt),[],'omitnan');
@@ -577,6 +587,9 @@ fprintf('\nRO ANN diagnostics\n');
 fprintf('  Attempted hours          : %10d\n',sum(roAttempt));
 fprintf('  In training domain       : %10d\n',sum(Hourly.RO_InTrainingDomain(roAttempt)));
 fprintf('  Classifier feasible      : %10d\n',sum(Hourly.RO_ClassifierFeasible(roAttempt)));
+if any(strcmp(Hourly.Properties.VariableNames,'RO_BoundaryFeasibleOverride'))
+    fprintf('  Boundary override        : %10d\n',sum(Hourly.RO_BoundaryFeasibleOverride(roAttempt)));
+end
 fprintf('  P_feasible mean/min/max  : %10.4f / %.4f / %.4f\n', ...
     mean(Hourly.RO_P_feasible(roAttempt),'omitnan'), ...
     min(Hourly.RO_P_feasible(roAttempt),[],'omitnan'), ...
