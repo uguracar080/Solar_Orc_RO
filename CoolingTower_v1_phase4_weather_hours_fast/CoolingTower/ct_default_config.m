@@ -45,11 +45,13 @@ CTConfig.water.rho_kgm3 = 997;
 % -------------------------------------------------------------------------
 % Numerics
 % -------------------------------------------------------------------------
-CTConfig.numerics.merkel_n_intervals = 100;
+CTConfig.numerics.merkel_n_intervals = 50;
 CTConfig.numerics.min_approach_C = 0.05;
 CTConfig.numerics.min_enthalpy_potential_Jkgda = 10;
 CTConfig.numerics.min_fan_ratio_for_solve = 1e-4;
-CTConfig.numerics.target_temperature_tolerance_C = 1e-4;
+CTConfig.numerics.target_temperature_tolerance_C = 0.02;
+CTConfig.numerics.inverse_temperature_tolerance_C = 0.02;
+CTConfig.numerics.fan_ratio_tolerance = 1e-4;
 
 % -------------------------------------------------------------------------
 % Default rating point used by examples / quickstarts

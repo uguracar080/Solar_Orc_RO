@@ -11,7 +11,7 @@ cfg.project_root = ProjectRoot;
 
 cfg.paths.weather_epw = fullfile(ProjectRoot,'Weather','TUR_IC_Mersin.173400_TMYx.2009-2023.epw');
 cfg.paths.weather_cache = fullfile(ProjectRoot,'Weather','TUR_IC_Mersin.173400_TMYx.2009-2023_weather_cache.mat');
-cfg.paths.seawater_csv = fullfile(ProjectRoot,'Hourly_profiles_seawater','seawater_profile.csv');
+cfg.paths.seawater_csv = fullfile(ProjectRoot,'Hourly_profiles_seawater','seawater_profile_RO_ready_TEOS10.csv');
 cfg.paths.ro_model = fullfile(ProjectRoot,'RO_MATLAB_Model_v1_8_0_FINAL_DATASET','RO_ANN_models_v1_9_1.mat');
 
 cfg.sim.startHour = 0;
@@ -29,6 +29,8 @@ cfg.solar.min_useful_heat_W = 100;
 cfg.solar.min_deltaT_gain_K = 5.0;
 cfg.solar.field.N_series = 5;
 cfg.solar.field.N_parallel = 20;
+cfg.solar.solver.FunctionTolerance = 1e-6;
+cfg.solar.solver.StepTolerance = 1e-6;
 cfg.solar.flow_control.enabled = true;
 cfg.solar.flow_control.factor_list = 0.50:0.25:2.00;
 cfg.solar.flow_control.selection_mode = 'max_heat_below_limit';
@@ -72,16 +74,17 @@ cfg.orc.solar_adapter_return_T_K = 115 + 273.15;
 cfg.orc.solar_adapter_min_deltaT_K = 2.0;
 
 cfg.preheater = struct();
-cfg.preheater.T_RO_in_rise_C = 5.0;
+cfg.preheater.T_RO_in_rise_C = 10.0;
+cfg.preheater.T_sw_design_C = 15.0;
 cfg.preheater.T_RO_in_design_C = NaN;
 cfg.preheater.T_RO_in_min_C = 20.0;
 cfg.preheater.T_RO_in_max_C = 45.0;
-cfg.preheater.dT_min_K = 3.0;
+cfg.preheater.dT_min_K = 5.0;
 cfg.preheater.control_mode = 'available_deltaT';
-cfg.preheater.deltaT_ON_K = 3.0;
-cfg.preheater.deltaT_OFF_K = 2.0;
+cfg.preheater.deltaT_ON_K = 5.0;
+cfg.preheater.deltaT_OFF_K = 4.0;
 cfg.preheater.enforce_cond_out_above_feed = false;
-cfg.preheater.cond_out_min_deltaT_to_feed_K = 3.0;
+cfg.preheater.cond_out_min_deltaT_to_feed_K = 5.0;
 cfg.preheater.U_design_Wm2K = 900;
 cfg.preheater.cp_hot_JkgK = 4180;
 cfg.preheater.cp_cold_JkgK = 3990;
@@ -100,6 +103,10 @@ cfg.preheater.Nt_step = 20;
 cfg.ct = struct();
 cfg.ct.T_cw_target_C = cfg.orc.cw_target_in_C;
 cfg.ct.Q_rated_fraction_of_design_condenser = 1.00;
+cfg.ct.merkel_n_intervals = 50;
+cfg.ct.target_temperature_tolerance_C = 0.02;
+cfg.ct.inverse_temperature_tolerance_C = 0.02;
+cfg.ct.fan_ratio_tolerance = 1e-4;
 cfg.ct.drift_fraction = 2e-5;
 cfg.ct.cycles_of_concentration = 5;
 
@@ -130,6 +137,14 @@ cfg.ro.Qf_train_m3h = 55.0;
 cfg.ro.R_target = 0.48;
 cfg.ro.rho_seawater_kgm3 = 1025;
 cfg.ro.model_file = cfg.paths.ro_model;
+
+cfg.pumps = struct();
+cfg.pumps.cw_circulation.enabled = true;
+cfg.pumps.cw_circulation.eta_hydraulic = 0.75;
+cfg.pumps.cw_circulation.eta_motor = 0.95;
+cfg.pumps.seawater_feed.enabled = true;
+cfg.pumps.seawater_feed.eta_hydraulic = 0.75;
+cfg.pumps.seawater_feed.eta_motor = 0.95;
 
 cfg.outputs.results_root = fullfile(ProjectRoot,'Results');
 cfg.outputs.use_timestamped_results = true;

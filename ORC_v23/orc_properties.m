@@ -15,11 +15,7 @@ if nargin < 2
     error('orc_properties:NotEnoughInputs','Property request is missing.');
 end
 
-if ~isfield(config,'orc_property_backend')
-    config = orc_default_config(config);
-else
-    config = orc_default_config(config);
-end
+config = orc_default_config(config);
 
 % =========================================================================
 % PROPERTY CACHE AND DIAGNOSTIC COMMANDS
@@ -81,22 +77,27 @@ end
 % =========================================================================
 orcBackend = lower(string(config.orc_property_backend));
 
-switch orcBackend
-    case "coolprop"
-        orcValue = localCoolPropProperty(config,varargin{:});
+if localIsStateBundleRequest(varargin{:})
+    orcValue = localStatePropertyBundle(config,orcBackend,varargin{:});
+else
 
-    case "fluidgrid"
-        if isfield(config,'orc_useFluidGrid') && ~logical(config.orc_useFluidGrid)
+    switch orcBackend
+        case "coolprop"
             orcValue = localCoolPropProperty(config,varargin{:});
-        elseif localIsFluidGridRequest(varargin{:})
-            orcValue = localFluidGridProperty(config,varargin{:});
-        else
-            orcValue = localCoolPropProperty(config,varargin{:});
-        end
 
-    otherwise
-        error('orc_properties:UnknownBackend', ...
-            'Unknown ORC property backend: %s',char(orcBackend));
+        case "fluidgrid"
+            if isfield(config,'orc_useFluidGrid') && ~logical(config.orc_useFluidGrid)
+                orcValue = localCoolPropProperty(config,varargin{:});
+            elseif localIsFluidGridRequest(varargin{:})
+                orcValue = localFluidGridProperty(config,varargin{:});
+            else
+                orcValue = localCoolPropProperty(config,varargin{:});
+            end
+
+        otherwise
+            error('orc_properties:UnknownBackend', ...
+                'Unknown ORC property backend: %s',char(orcBackend));
+    end
 end
 
 % =========================================================================
@@ -237,6 +238,150 @@ if ischar(orcFluid) || isstring(orcFluid)
 end
 end
 
+function tf = localIsStateBundleRequest(varargin)
+% Return true for a bundled state-property request.
+tf = false;
+if numel(varargin) < 1 || ~(ischar(varargin{1}) || isstring(varargin{1}))
+    return
+end
+request = upper(string(varargin{1}));
+tf = any(request == ["STATE","BUNDLE","PROPS"]);
+end
+
+function props = localStatePropertyBundle(config,orcBackend,varargin)
+% Return common transport/thermo properties for one pressure-based state.
+[P,stateKey,stateVal,orcFluid] = localParseStateBundle(varargin{:});
+switch orcBackend
+    case "fluidgrid"
+        if ~(isfield(config,'orc_useFluidGrid') && ~logical(config.orc_useFluidGrid)) && ...
+                localIsFluidGridRequest('H','P',P,char(stateKey),stateVal,orcFluid)
+            db = localLoadFluidGrid(config,orcFluid);
+            props = localFluidGridStateBundle(db,P,stateKey,stateVal);
+        else
+            props = localCoolPropStateBundle(config,P,stateKey,stateVal,orcFluid);
+        end
+    case "coolprop"
+        props = localCoolPropStateBundle(config,P,stateKey,stateVal,orcFluid);
+    otherwise
+        error('orc_properties:UnknownBackend', ...
+            'Unknown ORC property backend: %s',char(orcBackend));
+end
+end
+
+function [P,stateKey,stateVal,orcFluid] = localParseStateBundle(varargin)
+% Parse STATE,'P',P,<stateKey>,<stateVal>,fluid.
+if numel(varargin) ~= 6
+    error('orc_properties:StateBundleInputCount', ...
+        'STATE requests must use STATE,''P'',P,<state>,value,fluid.');
+end
+orcFluid = varargin{6};
+key1 = localCanonicalStateKey(varargin{2});
+val1 = varargin{3};
+key2 = localCanonicalStateKey(varargin{4});
+val2 = varargin{5};
+if key1 == "P"
+    P = val1;
+    stateKey = key2;
+    stateVal = val2;
+elseif key2 == "P"
+    P = val2;
+    stateKey = key1;
+    stateVal = val1;
+else
+    error('orc_properties:StateBundleStatePair', ...
+        'STATE requests require pressure as one state input.');
+end
+if ~any(stateKey == ["T","H","S","Q"])
+    error('orc_properties:StateBundleStatePair', ...
+        'Unsupported STATE pair: P,%s',char(stateKey));
+end
+end
+
+function props = localFluidGridStateBundle(db,P,stateKey,stateVal)
+% Evaluate one V5 thermoDB pressure-based state as a property struct.
+props = struct();
+props.P = P;
+switch stateKey
+    case "T"
+        T = stateVal;
+        props.T = T;
+        props.h = localInterpGridCached(db,'PT','H',P,T,"H",false);
+        props.s = localInterpGridCached(db,'PT','s',P,T,"S",false);
+        props.rho = localInterpGridCached(db,'PT','rho',P,T,"D",false);
+        props.cp = localInterpGridCached(db,'PT','cp',P,T,"C",false);
+        props.mu = localInterpGridCached(db,'PT','mu',P,T,"V",false);
+        props.k = localInterpGridCached(db,'PT','k',P,T,"L",false);
+        props.Q = localInterpGridCached(db,'PT','Q',P,T,"Q",true);
+    case "H"
+        h = stateVal;
+        props.h = h;
+        props.T = localInterpGridCached(db,'Ph','T',P,h,"T",false);
+        props.s = localInterpGridCached(db,'Ph','s',P,h,"S",false);
+        props.rho = localInterpGridCached(db,'Ph','rho',P,h,"D",false);
+        props.cp = localInterpGridCached(db,'Ph','cp',P,h,"C",false);
+        props.mu = localInterpGridCached(db,'Ph','mu',P,h,"V",false);
+        props.k = localInterpGridCached(db,'Ph','k',P,h,"L",false);
+        props.Q = localInterpGridCached(db,'Ph','Q',P,h,"Q",true);
+    case "S"
+        s = stateVal;
+        props.s = s;
+        props.h = localInterpGridCached(db,'Ps','H',P,s,"H",false);
+        props.T = localInterpGridCached(db,'Ps','T',P,s,"T",false);
+        props.rho = localInterpGridCached(db,'Ps','rho',P,s,"D",false);
+        props.cp = localInterpGridCached(db,'Ps','cp',P,s,"C",false);
+        props.mu = localInterpGridCached(db,'Ps','mu',P,s,"V",false);
+        props.k = localInterpGridCached(db,'Ps','k',P,s,"L",false);
+        props.Q = localInterpGridCached(db,'Ps','Q',P,s,"Q",true);
+    case "Q"
+        Q = stateVal;
+        props.Q = Q;
+        props.T = localInterpSat(db.sat.P,db.sat.T,P,"T");
+        props.h = localInterpSat(db.sat.P,db.sat.hf,P,"H") + ...
+            Q.*(localInterpSat(db.sat.P,db.sat.hg,P,"H") - localInterpSat(db.sat.P,db.sat.hf,P,"H"));
+        props.s = localInterpSat(db.sat.P,db.sat.sf,P,"S") + ...
+            Q.*(localInterpSat(db.sat.P,db.sat.sg,P,"S") - localInterpSat(db.sat.P,db.sat.sf,P,"S"));
+        rho_f = localInterpSat(db.sat.P,db.sat.rho_f,P,"D");
+        rho_g = localInterpSat(db.sat.P,db.sat.rho_g,P,"D");
+        props.rho = 1./((1 - Q)./rho_f + Q./rho_g);
+        props.cp = localEndpointSatTransport(db.sat.P,db.sat.cp_f,db.sat.cp_g,P,Q,"C");
+        props.mu = localEndpointSatTransport(db.sat.P,db.sat.mu_f,db.sat.mu_g,P,Q,"V");
+        props.k = localEndpointSatTransport(db.sat.P,db.sat.k_f,db.sat.k_g,P,Q,"L");
+end
+end
+
+function props = localCoolPropStateBundle(config,P,stateKey,stateVal,orcFluid)
+% Fallback bundle path for non-grid fluids/backends.
+props = struct();
+props.P = P;
+stateName = char(stateKey);
+props.T = localCoolPropStateValue(config,"T",P,stateName,stateVal,orcFluid);
+props.h = localCoolPropStateValue(config,"H",P,stateName,stateVal,orcFluid);
+props.s = localCoolPropStateValue(config,"S",P,stateName,stateVal,orcFluid);
+props.rho = localCoolPropStateValue(config,"D",P,stateName,stateVal,orcFluid);
+props.cp = localCoolPropStateValue(config,"C",P,stateName,stateVal,orcFluid);
+props.mu = localCoolPropStateValue(config,"V",P,stateName,stateVal,orcFluid);
+props.k = localCoolPropStateValue(config,"L",P,stateName,stateVal,orcFluid);
+try
+    props.Q = localCoolPropProperty(config,'Q','P',P,stateName,stateVal,orcFluid);
+catch
+    props.Q = NaN;
+end
+switch stateKey
+    case "T"
+        props.T = stateVal;
+    case "H"
+        props.h = stateVal;
+    case "S"
+        props.s = stateVal;
+    case "Q"
+        props.Q = stateVal;
+end
+end
+
+function value = localCoolPropStateValue(config,outKey,P,stateName,stateVal,orcFluid)
+value = localCoolPropProperty(config,char(outKey),'P',P,stateName,stateVal,orcFluid);
+end
+
 % =========================================================================
 % LOCAL HELPER: FLUID-GRID BACKEND
 % =========================================================================
@@ -311,9 +456,35 @@ if ~isKey(cachedDBByFile,gridKey)
     end
     dbTry = S.thermoDB;
     localValidateFluidGrid(dbTry,orcFluid,gridFile);
+    dbTry = localAttachFluidGridInterpolants(dbTry);
     cachedDBByFile(gridKey) = dbTry;
 end
 db = cachedDBByFile(gridKey);
+end
+
+function db = localAttachFluidGridInterpolants(db)
+% Build reusable 2-D interpolants once per loaded thermoDB file.
+db.interp = struct();
+db.interp.Ph = localBuildBlockInterpolants(db.Ph,'P','h');
+db.interp.Ps = localBuildBlockInterpolants(db.Ps,'P','s');
+db.interp.PT = localBuildBlockInterpolants(db.PT,'P','T');
+end
+
+function blockInterp = localBuildBlockInterpolants(block,xField,yField)
+blockInterp = struct();
+x = block.(xField)(:);
+y = block.(yField)(:);
+names = fieldnames(block);
+for i = 1:numel(names)
+    name = names{i};
+    if strcmp(name,xField) || strcmp(name,yField)
+        continue
+    end
+    value = block.(name);
+    if isnumeric(value) && isequal(size(value),[numel(x),numel(y)])
+        blockInterp.(name) = griddedInterpolant({x,y},value,'linear','none');
+    end
+end
 end
 
 function gridFile = localResolveFluidGridFile(config,orcFluid)
@@ -482,19 +653,19 @@ switch outKey
     case "H"
         value = h;
     case "T"
-        value = localInterpGrid(db.Ph.P,db.Ph.h,db.Ph.T,P,h,outKey);
+        value = localInterpGridCached(db,'Ph','T',P,h,outKey,false);
     case "S"
-        value = localInterpGrid(db.Ph.P,db.Ph.h,db.Ph.s,P,h,outKey);
+        value = localInterpGridCached(db,'Ph','s',P,h,outKey,false);
     case "D"
-        value = localInterpGrid(db.Ph.P,db.Ph.h,db.Ph.rho,P,h,outKey);
+        value = localInterpGridCached(db,'Ph','rho',P,h,outKey,false);
     case "C"
-        value = localInterpGrid(db.Ph.P,db.Ph.h,db.Ph.cp,P,h,outKey);
+        value = localInterpGridCached(db,'Ph','cp',P,h,outKey,false);
     case "V"
-        value = localInterpGrid(db.Ph.P,db.Ph.h,db.Ph.mu,P,h,outKey);
+        value = localInterpGridCached(db,'Ph','mu',P,h,outKey,false);
     case "L"
-        value = localInterpGrid(db.Ph.P,db.Ph.h,db.Ph.k,P,h,outKey);
+        value = localInterpGridCached(db,'Ph','k',P,h,outKey,false);
     case "Q"
-        value = localInterpGridAllowNaN(db.Ph.P,db.Ph.h,db.Ph.Q,P,h);
+        value = localInterpGridCached(db,'Ph','Q',P,h,outKey,true);
     otherwise
         error('orc_properties:FluidGridPH', ...
             'Unsupported P,H output property: %s',char(outKey));
@@ -509,19 +680,19 @@ switch outKey
     case "S"
         value = s;
     case "H"
-        value = localInterpGrid(db.Ps.P,db.Ps.s,db.Ps.H,P,s,outKey);
+        value = localInterpGridCached(db,'Ps','H',P,s,outKey,false);
     case "T"
-        value = localInterpGrid(db.Ps.P,db.Ps.s,db.Ps.T,P,s,outKey);
+        value = localInterpGridCached(db,'Ps','T',P,s,outKey,false);
     case "D"
-        value = localInterpGrid(db.Ps.P,db.Ps.s,db.Ps.rho,P,s,outKey);
+        value = localInterpGridCached(db,'Ps','rho',P,s,outKey,false);
     case "C"
-        value = localInterpGrid(db.Ps.P,db.Ps.s,db.Ps.cp,P,s,outKey);
+        value = localInterpGridCached(db,'Ps','cp',P,s,outKey,false);
     case "V"
-        value = localInterpGrid(db.Ps.P,db.Ps.s,db.Ps.mu,P,s,outKey);
+        value = localInterpGridCached(db,'Ps','mu',P,s,outKey,false);
     case "L"
-        value = localInterpGrid(db.Ps.P,db.Ps.s,db.Ps.k,P,s,outKey);
+        value = localInterpGridCached(db,'Ps','k',P,s,outKey,false);
     case "Q"
-        value = localInterpGridAllowNaN(db.Ps.P,db.Ps.s,db.Ps.Q,P,s);
+        value = localInterpGridCached(db,'Ps','Q',P,s,outKey,true);
     otherwise
         error('orc_properties:FluidGridPS', ...
             'Unsupported P,S output property: %s',char(outKey));
@@ -536,19 +707,19 @@ switch outKey
     case "T"
         value = T;
     case "H"
-        value = localInterpGrid(db.PT.P,db.PT.T,db.PT.H,P,T,outKey);
+        value = localInterpGridCached(db,'PT','H',P,T,outKey,false);
     case "S"
-        value = localInterpGrid(db.PT.P,db.PT.T,db.PT.s,P,T,outKey);
+        value = localInterpGridCached(db,'PT','s',P,T,outKey,false);
     case "D"
-        value = localInterpGrid(db.PT.P,db.PT.T,db.PT.rho,P,T,outKey);
+        value = localInterpGridCached(db,'PT','rho',P,T,outKey,false);
     case "C"
-        value = localInterpGrid(db.PT.P,db.PT.T,db.PT.cp,P,T,outKey);
+        value = localInterpGridCached(db,'PT','cp',P,T,outKey,false);
     case "V"
-        value = localInterpGrid(db.PT.P,db.PT.T,db.PT.mu,P,T,outKey);
+        value = localInterpGridCached(db,'PT','mu',P,T,outKey,false);
     case "L"
-        value = localInterpGrid(db.PT.P,db.PT.T,db.PT.k,P,T,outKey);
+        value = localInterpGridCached(db,'PT','k',P,T,outKey,false);
     case "Q"
-        value = localInterpGridAllowNaN(db.PT.P,db.PT.T,db.PT.Q,P,T);
+        value = localInterpGridCached(db,'PT','Q',P,T,outKey,true);
     otherwise
         error('orc_properties:FluidGridPT', ...
             'Unsupported P,T output property: %s',char(outKey));
@@ -575,15 +746,12 @@ maskG = Q >= 0.5;
 value(maskG) = vg(maskG);
 end
 
-function value = localInterpGrid(Paxis,Xaxis,field,P,X,outKey)
-% Interpolate a V5 2-D property field without extrapolation.
-value = localInterpGridAllowNaN(Paxis,Xaxis,field,P,X);
-localAssertFiniteGridValue(value,outKey);
+function value = localInterpGridCached(db,blockName,fieldName,P,X,outKey,allowNaN)
+% Evaluate a cached griddedInterpolant from a V5 2-D property block.
+value = db.interp.(blockName).(fieldName)(P,X);
+if ~allowNaN
+    localAssertFiniteGridValue(value,outKey);
 end
-
-function value = localInterpGridAllowNaN(Paxis,Xaxis,field,P,X)
-% Interpolate a V5 2-D property field; Q maps may return NaN for single phase.
-value = interpn(Paxis(:),Xaxis(:),field,P,X,'linear',NaN);
 end
 
 function localAssertFiniteGridValue(value,outKey)

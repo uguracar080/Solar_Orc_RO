@@ -1,0 +1,2448 @@
+SOLAR-ORC-RO SISTEM MODELI - PROJE TEKNIK ACIKLAMA DOSYASI
+===========================================================
+
+Guncelleme tarihi: 2026-08-25
+Ana amac: Bu dosya, projeyi yeni okuyacak bir yazilimcinin tum klasoru
+yeniden taramadan aktif sistem mimarisini, hesap akisini, parametrelerin
+nerede nasil kullanildigini ve karar algoritmalarini anlayabilmesi icin
+tutulan canli teknik dokumandir. Projede hesap mantigi veya arayuz degistikce
+ilgili bolum bu dosyada da guncellenmelidir.
+
+
+1. KISA OZET
+------------
+
+Bu proje entegre bir solar termal - ORC - RO deniz suyu aritma sisteminin
+MATLAB modelidir. Aktif V1 hedefi optimizasyon degil, tek bir sabit
+konfigurasyonun yillik/saatlik olarak uc uca calismasidir. Optimizasyon
+daha sonra bu sabit-konfigurasyon kosucusunu aday degerlendirme fonksiyonu
+gibi cagiracaktir.
+
+Aktif ana zincir:
+
+Weather + seawater profile
+  -> PTC solar field
+  -> ORC evaporator hot stream
+  -> fixed-geometry ORC off-design dispatch
+  -> ORC condenser cooling-water outlet
+  -> RO train dispatch with seawater preheater control
+  -> RO ANN surrogate
+  -> cooling tower trim/backup heat rejection
+  -> auxiliary pump electrical bookkeeping
+  -> hourly outputs, summary, report, figures
+
+Aktif ana giris:
+
+  System_Driver/run_single_configuration_v1.m
+
+Aktif programatik API:
+
+  System_Driver/run_single_configuration_core_v1.m
+
+Aktif saatlik kapali cevrim cozumcu:
+
+  System_Driver/system_hourly_coupled_solver_v1.m
+
+Eski sirali dispatcher:
+
+  System_Driver/system_hourly_dispatch_v1.m
+
+Bu dosya hala repoda bulunur fakat aktif run path artik kapali cevrim
+cozumcudur. Yeni entegrasyonlar once system_hourly_coupled_solver_v1.m
+uzerinden dusunulmelidir.
+
+
+2. KLASOR HARITASI
+------------------
+
+System_Driver/
+  Aktif sistem orkestrasyonu. Path ayari, config, tek-konfigurasyon kosusu,
+  saatlik kapali cevrim cozumcu, rapor ve figur uretimi buradadir.
+
+Solar_Field/
+  Aktif PTC-only solar alan modeli: solar_field_ptc_v1.m.
+  Eski monolitik PTC/HX/ORC/exergy dosyalari "eski calisma" altinda durur.
+
+ORC_v23/
+  Aktif ORC modeli. Stage-1 tasarim, STHE evaporator/condenser sizing,
+  hydraulic feedback, Stage-2/off-design rating ve dispatch algoritmasini
+  icerir. Ana dosyalar:
+    orc_stage1_sizing.m
+    orc_thermo_design.m
+    orc_evaporator_design.m
+    orc_condenser_design.m
+    orc_offdesign_rating.m
+    orc_offdesign_dispatch.m
+    orc_stream_properties.m
+    orc_properties.m
+    orc_finalize_config.m
+    syltherm800_properties_v2.m
+
+Heat_Exchangers/
+  ORC disindaki sistem seviyesi is degistiriciler. Aktif V1 preheater:
+    preheater_sthe_design_v1.m
+    preheater_sthe_rating_v1.m
+    preheater_sthe_core_v1.m
+    preheater_water_properties_v1.m
+
+CoolingTower_v1_phase4_weather_hours_fast/
+  Aktif wet cooling tower modeli. CoolingTower/ altinda Merkel off-design,
+  fan power, su tuketimi, psikrometri ve rated design point dosyalari bulunur.
+
+RO_MATLAB_Model_v1_8_0_FINAL_DATASET/
+  Aktif sistemde kullanilan RO ANN surrogate ve onu ureten/dogrulayan
+  ayrintili RO truth-model arka plani. Aktif runtime cagri:
+    ro_predict_ann_surrogate_v1_9_1.m
+  Aktif model dosyasi:
+    RO_ANN_models_v1_9_1.mat
+
+Weather/
+  Mersin EPW dosyasi, weather cache ve EPW okuyucu:
+    read_epw_weather.m
+
+Hourly_profiles_seawater/
+  Saatlik deniz suyu sicaklik/tuzluluk profilleri:
+    seawater_profile.csv
+    seawater_profile_RO_ready_TEOS10.csv
+    seawater_profile_RO_ready_EOS80.csv
+  Aktif sistem config'i TEOS-10 ile uretilmis RO-ready dosyayi kullanir.
+  EOS80 dosyasi yalnizca GSW toolbox yokken yapilan diagnostik/kararlilik
+  karsilastirmasi icin tutulur.
+
+External/
+  Dis kaynakli yardimci toolbox'lar. Su anda TEOS-10 Gibbs SeaWater (GSW)
+  MATLAB toolbox'i burada tutulur. Zip dogrudan External altina acilmistir;
+  ana GSW .m dosyalari ve html/, library/, pdf/, thermodynamics_from_t/
+  alt klasorleri bu dizindedir.
+
+Thermal_Storage/
+  Aktif V1 depolama placeholder'i:
+    storage_water_tank_v1.m
+  Bu gercek PCM kontrolu degildir; fazla solar isiyi kabul eden duyulur
+  su tanki muhasebesidir.
+
+Fluid_grid/
+  R1233zd(E), Water ve yardimci property grid generatorleri. Ayrintili
+  sema dokumani:
+    THERMODB_V5_TEKNIK_ACIKLAMA.txt
+
+PCM-TRNSYS_Matlab_Coupling/
+  Type155/TRNSYS/PCM test dosyalari. Aktif V1 yillik zincirde calismaz.
+  Ileride optimizasyon adaylari icin dis MATLAB dongusunden TRNSYS run
+  mantigi buradan baglanabilir.
+
+Results/
+  Run ciktilari. Timestamp'li run klasorleri altinda CSV, MAT, TXT rapor
+  ve figure dosyalari yazilir.
+
+
+3. CALISTIRMA VE ANA AKIS
+-------------------------
+
+3.1 Script akisi
+
+run_single_configuration_v1.m MATLAB Run butonu icin hazirlanmis script
+girisidir. Is akisi:
+
+1. ProjectRoot bulunur.
+2. system_paths_v1(ProjectRoot) cagrilir.
+3. cfg = system_config_v1(ProjectRoot) ile varsayilan config alinir.
+4. Script icindeki kullanici/editlenebilir bloklar cfg uzerine override
+   edilir.
+5. Results = run_single_configuration_core_v1(cfg) cagrilir.
+
+Scriptte su an run_single_configuration_v1.m icin:
+
+  cfg.sim.startHour = 770
+  cfg.sim.endHour = 800
+  cfg.sim.timeStep_min = 60
+
+Bu script penceresi 30 saatlik bir test/konfigurasyon kosusudur.
+system_config_v1.m default'u ise startHour=0, endHour=24, timeStep_min=60
+olarak tutulur. startHour/endHour 0-based ve half-open interval mantigindadir.
+Ornek: 5500-5548 araligi 48 saat kosar. timeStep_min 60'tan kucukse
+sayisal weather/seawater kolonlari lineer interpolasyonla uretilir.
+
+3.2 Core fonksiyon akisi
+
+run_single_configuration_core_v1.m sirasi:
+
+1. Path ayari:
+   system_paths_v1(ProjectRoot)
+
+2. Simulation/output config finalizasyonu:
+   localFinalizeSimulationConfig
+   localFinalizeOutputConfig
+
+3. Girdi okuma:
+   localLoadWeather(cfg)
+   readtable(cfg.paths.seawater_csv)
+   localPrepareInputWindow
+
+4. ORC Stage-1 tasarim:
+   localDesignOrc
+   -> orc_finalize_config
+   -> orc_stage1_sizing
+
+5. Preheater ve cooling tower tasarim:
+   localDesignHeatRejectionTrain
+   -> preheater_sthe_design_v1
+   -> ct_default_config
+   -> ct_rate_design_point
+
+6. Saatlik kapali cevrim sistem cozumu:
+   system_hourly_coupled_solver_v1
+
+7. Summary:
+   localSummarize
+   localAttachRunTiming
+
+8. Figurler:
+   generate_all_figures_v1
+
+9. Ciktilar:
+   writetable(Hourly, hourly_csv)
+   writetable(Summary, summary_csv)
+   write_simulation_report_v1
+   save(summary_mat, cfg, Summary, Hourly, PHDesign, CTDesign, orcDesign,
+        orcAnnual, FigureResults, ReportFile, RunTiming)
+
+
+4. PATH ONCELIGI
+----------------
+
+system_paths_v1.m aktif klasorleri MATLAB path basina ekler. Bu onemlidir,
+cunku repoda eski ORC/solar dosyalari da vardir ve aktif ORC_v23 dosyalarinin
+golgelemeye ugramamasi gerekir.
+
+Path'e -begin ile eklenenler:
+
+  System_Driver
+  Solar_Field
+  Heat_Exchangers
+  Thermal_Storage
+  ORC_v23
+  CoolingTower_v1_phase4_weather_hours_fast/CoolingTower
+  Weather
+  Hourly_profiles_seawater
+  RO_MATLAB_Model_v1_8_0_FINAL_DATASET
+  System_Driver/Figures
+
+External/GSW notu:
+  GSW toolbox aktif sistem path listesine otomatik -begin ile alinmaz.
+  TEOS-10 profil yeniden uretilecegi zaman MATLAB oturumunda External ve
+  alt klasorleri path'e eklenmelidir:
+
+    addpath(genpath(fullfile(ProjectRoot,'External')))
+    gsw_check_functions
+
+  Kurulum dogrulamasi icin gsw_check_functions PASS vermelidir. Bu projede
+  test edilen GSW surumu 3.06.16'dir.
+
+
+5. ANA CONFIG PARAMETRELERI
+---------------------------
+
+Varsayilanlar system_config_v1.m icindedir. run_single_configuration_v1.m
+bu degerlerin bir kismini run'a ozel override eder.
+
+Aktif run_single_configuration_v1.m override ozeti:
+
+  cfg.sim.startHour = 770
+  cfg.sim.endHour = 800
+  cfg.sim.timeStep_min = 60
+  cfg.solar.field.N_series = 20
+  cfg.solar.field.N_parallel = 10
+  cfg.solar.T_HTF_in_K = 380.0
+  cfg.solar.V_Lmin_1module = 56.8
+  cfg.solar.V_Lmin_1module_reference = 56.8
+  cfg.solar.min_DNI_Wm2 = 50
+  cfg.solar.min_deltaT_gain_K = 5.0
+  cfg.solar.flow_control.enabled = true
+  cfg.solar.flow_control.factor_list = 0.50:0.25:2.00
+  cfg.solar.flow_control.selection_mode = 'max_heat_below_limit'
+  cfg.solar.flow_control.T_out_target_C = 390.0
+  cfg.solar.flow_control.T_out_min_C = 160.0
+  cfg.solar.flow_control.T_out_max_C = 400.0
+  cfg.solar.pump.enabled = true
+  cfg.solar.pump.eta_hydraulic = 0.75
+  cfg.solar.pump.eta_motor = 0.95
+  cfg.orc.working_fluid = 'R1233zd(E)'
+  cfg.orc.eta_turb = 0.85
+  cfg.orc.eta_pump = 0.80
+  cfg.orc.W_net_design_W = 250e3
+  cfg.orc.P_evap_design_Pa = 10.7e5
+  cfg.orc.P_cond_design_Pa = 2.0e5
+  cfg.orc.hot_stream_design_T_in_K = 160 + 273.15
+  cfg.orc.hot_stream_design_T_return_K = 115 + 273.15
+  cfg.orc.hot_stream_fluid = 'Syltherm800'
+  cfg.orc.hot_stream_design_mdot_kg_s = 30.0
+  cfg.orc.cw_target_in_C = 27.0
+  cfg.orc.mdot_cw_design_kg_s = 100.0
+  cfg.ct.T_cw_target_C = cfg.orc.cw_target_in_C
+  cfg.ro.N_train_total = 6
+  cfg.preheater.T_RO_in_rise_C = 10.0
+  cfg.preheater.T_RO_in_min_C = 20.0
+  cfg.preheater.N_parallel_min = 1
+  cfg.preheater.N_parallel_max = 20
+  cfg.preheater.Nt_min = 20
+  cfg.preheater.Nt_max = 1200
+  cfg.preheater.Nt_step = 20
+  cfg.ct.Q_rated_fraction_of_design_condenser = 1.00
+  cfg.storage.enabled = true
+  cfg.storage.type = 'water_tank_v1'
+  cfg.storage.volume_m3 = 100.0
+  cfg.storage.T_initial_C = 30.0
+  cfg.storage.T_min_C = 25.0
+  cfg.storage.T_max_C = 95.0
+  cfg.storage.solar_return_sink_enabled = true
+
+5.1 cfg.paths
+
+cfg.paths.weather_epw
+  Weather/TUR_IC_Mersin.173400_TMYx.2009-2023.epw
+
+cfg.paths.weather_cache
+  Weather/TUR_IC_Mersin.173400_TMYx.2009-2023_weather_cache.mat
+
+cfg.paths.seawater_csv
+  Hourly_profiles_seawater/seawater_profile_RO_ready_TEOS10.csv
+
+  Bu dosya, CMEMS native Practical Salinity kolonunu TEOS-10 GSW toolbox ile
+  RO modelinin bekledigi Cf_kg_m3 tuz konsantrasyonu kolonuna donusturur.
+  Ham seawater_profile.csv korunur, fakat aktif annual run dogrudan ham
+  Salinity_CMEMS_native degerini ANN'e gondermemelidir.
+
+cfg.paths.ro_model
+  RO_MATLAB_Model_v1_8_0_FINAL_DATASET/RO_ANN_models_v1_9_1.mat
+
+5.2 cfg.sim
+
+startHour, endHour:
+  0-based source-hour araligi. endHour dahil degildir.
+
+timeStep_min:
+  Saatlik veya alt-saatlik zaman cozunurlugu.
+
+dt_s:
+  timeStep_min*60 olarak finalizasyon sirasinda set edilir.
+
+nHours:
+  endHour-startHour ve timeStep_min uzerinden hesaplanir.
+
+5.3 cfg.solar
+
+T_HTF_in_K:
+  Ilk solar loop inlet tahmini / standby degeri.
+
+V_Lmin_1module:
+  PTC modul basina hacimsel debi.
+
+V_Lmin_1module_reference:
+  Flow-control faktorlerinin carptigi referans deger. Su an 56.8 L/min.
+
+min_DNI_Wm2:
+  Bunun altinda solar field kapali sayilir.
+
+min_useful_heat_W:
+  Hesaplanan useful heat bunun altindaysa solar feasible false olabilir.
+
+min_deltaT_gain_K:
+  Flow-control guard icin minimum HTF sicaklik artisi.
+
+field.N_series, field.N_parallel:
+  Seri modul sayisi sicaklik artisina, paralel kol sayisi toplam kapasiteye
+  dogrudan etki eder. Scriptte su an 20 x 10 kullaniliyor; config default
+  5 x 20.
+
+solver.FunctionTolerance, solver.StepTolerance:
+  Solar collector modul fsolve toleranslari. system_config_v1 default'u
+  1e-6 / 1e-6'dir. Eski 1e-10 degerine gore 48 saatlik duyarlilik testinde
+  Tout, Q useful ve dP farki sifir gorulmustur.
+
+flow_control.enabled:
+  true ise saatlik aday debi faktorleri denenir.
+
+flow_control.factor_list:
+  Referans debinin hangi faktorlerle denenecigi. Varsayilan 0.50:0.25:2.00.
+
+flow_control.selection_mode:
+  "max_heat_below_limit" veya "closest_target".
+
+flow_control.search_mode:
+  "adaptive_local_then_full" aktif. Bir onceki saatten uygun ise local
+  komsu faktorler denenir, gerekiyorsa full search'e dusulur.
+
+flow_control.T_out_target_C, T_out_min_C, T_out_max_C:
+  HTF outlet secim/guard bandi. T_out_max_C ustunde aday gecersiz olur.
+
+solar.pump:
+  enabled, eta_hydraulic, eta_motor. Solar field dP + ORC evaporator hot-side
+  dP uzerinden solar pump power hesaplanir.
+  Solar field tarafinda debi paralel kol sayisi ile, basinc dusumu seri
+  kollektor sayisi ile temsil edilir: solar_field_ptc_v1 toplam debiyi
+  N_parallel ile carpar, dP_HTF_Pa ise bir seri string boyunca toplanan
+  branch dP'dir.
+
+5.4 cfg.orc
+
+working_fluid:
+  R1233zd(E)
+
+eta_turb, eta_pump:
+  Turbin ve ORC pompa izentropik verimleri.
+
+W_net_design_W:
+  ORC nominal net gucu. Stage-1 mdot_orc bu degerden hesaplanabilir.
+
+P_evap_design_Pa, P_cond_design_Pa:
+  Subcritical ORC cycle tasarim basinclari.
+
+hot_stream_fluid:
+  Varsayilan Syltherm800. Bu durumda ORC evaporator hot side, solar field
+  T_HTF_out_K ve mdot_HTF_kg_s degerlerini dogrudan kullanir.
+
+hot_stream_design_T_in_K, hot_stream_design_T_return_K:
+  ORC Stage-1 external hot stream tasarim sinirlari.
+
+hot_stream_design_mdot_kg_s:
+  ORC Stage-1 tasarim hot stream debisi.
+
+cold_stream_fluid:
+  Water.
+
+cw_target_in_C:
+  ORC condenser loop hedef giris sicakligi. CT hedefi de buna baglanir.
+
+mdot_cw_design_kg_s:
+  ORC condenser/cooling-water loop debisi.
+
+operating_mode:
+  "dispatch" ise orc_offdesign_dispatch kullanilir.
+
+solar_adapter_return_T_K, solar_adapter_min_deltaT_K:
+  Sadece hot_stream_fluid Water secilirse eski water-equivalent solar heat
+  adapter icin kullanilir.
+
+5.5 cfg.preheater
+
+T_RO_in_rise_C:
+  Ham deniz suyu sicakligi uzerine hedef sicaklik artisi. V1 hedefi:
+  T_target = clamp(Tsw_raw + rise, T_RO_in_min_C, T_RO_in_max_C)
+
+T_sw_design_C:
+  Preheater design point cold-inlet deniz suyu sicakligi. Bu deger artik
+  simulasyon penceresinin ilk saatine bagli degildir. Varsayilan 15 C'dir.
+  NaN birakilirsa geriye uyumluluk icin ilk seawater profili sicakligi
+  fallback olarak kullanilir.
+
+T_RO_in_min_C, T_RO_in_max_C:
+  ANN domain ile uyumlu RO inlet sicaklik sinirlari.
+
+dT_min_K:
+  Preheater terminal minimum yaklasim.
+
+deltaT_ON_K, deltaT_OFF_K:
+  Runtime preheater deadband kontrolu.
+
+enforce_cond_out_above_feed:
+  true olursa ORC dispatch adaylari condenser outlet sicakliginin feed
+  uzerinde yeterli margin birakmasina zorlanabilir.
+
+geometry_family:
+  "condenser" ise preheater STHE geometri ailesinde condenser tube boyutlari
+  kullanilir.
+
+N_parallel_max, Nt_min, Nt_max, Nt_step:
+  Preheater sabit geometri arama limitleri.
+
+5.6 cfg.ct
+
+T_cw_target_C:
+  Cooling tower cold-water outlet hedefi. Genelde cfg.orc.cw_target_in_C.
+
+Q_rated_fraction_of_design_condenser:
+  CT rated duty = bu faktor * ORC design condenser duty.
+
+drift_fraction, cycles_of_concentration:
+  CT makeup water hesabinda kullanilir.
+
+merkel_n_intervals:
+  Merkel integral discretization araligi. Aktif default 50'dir.
+
+target_temperature_tolerance_C:
+  Fan-ratio target residual toleransi. Aktif default 0.02 C'dir.
+
+inverse_temperature_tolerance_C:
+  ct_merkel_number inverse water-out fzero TolX toleransi. Aktif default
+  0.02 C'dir.
+
+fan_ratio_tolerance:
+  ct_solve_fan_for_target fan ratio fzero TolX toleransi. Aktif default
+  1e-4'tur.
+
+5.7 cfg.storage
+
+enabled:
+  Water tank placeholder aktif/pasif.
+
+volume_m3, T_initial_C, T_min_C, T_max_C, rho_kgm3, cp_JkgK:
+  Duyulur depolama kapasitesi ve SOC hesabinin girdileri.
+
+solar_return_sink_enabled:
+  true ise ORC evaporator hot-side outlet sicakligi, o saatki solar inlet
+  tahmininin ustundeyse fazla isi "return sink" olarak depolama arayuzune
+  aktarilir ve HTF return solar inlet'e cekilir. Bu gercek PCM kontrolunun
+  gecici temsilidir.
+
+5.8 cfg.ro
+
+N_train_total:
+  Kurulu RO train sayisi. system_config_v1 default'u 1'dir. Aktif
+  run_single_configuration_v1 script'i bunu 6 olarak override eder. Saatlik
+  cozumcu bunu azaltarak dispatch yapar.
+
+Qf_train_m3h:
+  Tek train feed debisi. ANN wrapper'a aynen girer.
+
+R_target:
+  Tek train hedef recovery. Qp_train = Qf_train * R_target.
+
+rho_seawater_kgm3:
+  Preheater seawater mass-flow hesabi icin kullanilir.
+
+model_file:
+  RO_ANN_models_v1_9_1.mat.
+
+5.9 cfg.pumps
+
+cw_circulation:
+  ORC condenser + preheater hot-side + cooling tower su devresi sirkulasyon
+  pompasi. enabled, eta_hydraulic ve eta_motor alanlari vardir. Cooling tower
+  ic dP'si su an ihmal edilir.
+
+seawater_feed:
+  RO feed/deniz suyu hatti yardimci pompasi. enabled, eta_hydraulic ve
+  eta_motor alanlari vardir. Mevcut V1'de sadece preheater cold-side dP'si
+  bu pompaya eklenir ve yalniz preheater on iken hesaplanir.
+
+
+6. GIRDILER
+-----------
+
+6.1 Weather
+
+read_epw_weather.m EPW dosyasini okur ve cache kullanir. Cache ayni EPW
+dosya adi ile tasinabilir sekilde dogrulanir. Uretilen temel kolonlar:
+
+  Year, Month, Day, Hour, Minute, Flags
+  T_amb_C
+  RH_pct
+  Patm_Pa
+  T_wb_C
+  GHI_Whm2
+  DNI_Whm2
+  DHI_Whm2
+  WindDir_deg
+  WindSpd_ms
+
+Wet-bulb once HAPropsSI ile denenir, hata olursa Stull yaklasimi kullanilir.
+Cache varsa EPW yeniden okunmaz.
+
+6.2 Seawater
+
+Hourly_profiles_seawater/seawater_profile.csv ham yillik deniz suyu profilidir.
+Aktif sistem girdisi:
+
+  Hourly_profiles_seawater/seawater_profile_RO_ready_TEOS10.csv
+
+Bu dosya RO_MATLAB_Model_v1_8_0_FINAL_DATASET/other_files/
+ro_preprocess_seawater_profile_teos10.m ile uretilir. Gerekli TEOS-10 GSW
+fonksiyonlari:
+
+  gsw_p_from_z
+  gsw_SA_from_SP
+  gsw_CT_from_pt
+  gsw_rho
+
+2026-08-24 guncellemesinde resmi TEOS-10 donusumu ile bulunan profil araligi:
+
+  Salinity_CMEMS_native range = 37.621559 - 39.942451
+  Absolute_Salinity range    = 37.799240 - 40.131094 g/kg
+  Cf_kg_m3 range             = 38.842726 - 41.209819 kg/m3
+
+Bu nedenle ANN'in 38.5 kg/m3 Cf alt siniri, dogru Cf_kg_m3 kolonu
+kullanildiginda mevcut Mersin profilinde salinity kaynakli domain fail
+uretmez. Native salinity degerleri dogrudan ANN'e verilmemelidir.
+
+Aktif kodda zorunlu sicaklik kolonu:
+
+  SeaWater_Temperature_C
+
+Tuzluluk/konsantrasyon icin kabul edilen kolon adlari:
+
+  Cf_kg_m3
+  Salinity_kg_m3
+  Salinity_CMEMS_native
+
+system_hourly_coupled_solver_v1.m localSeawaterConcentration bu sirayla
+kolon arar. TEOS-10 dosyasinda Cf_kg_m3 bulundugu icin bu kolon ilk sirada
+kullanilir.
+
+
+7. SAATLIK KAPALI CEVRIM COZUCU
+-------------------------------
+
+system_hourly_coupled_solver_v1.m her zaman adiminda iki sicaklik dongusunu
+kapatir:
+
+1. Solar/ORC evaporator loop:
+   Solar field inlet TsolarIn_K tahmin edilir.
+   Solar field bu inlet ile T_HTF_out_K uretir.
+   ORC evaporator bu hot stream'i kullanir.
+   ORC evaporator hot-side outlet TsolarNextRaw_K olarak gelir.
+   Storage return sink aktifse TsolarNext_K, TsolarIn_K degerine cekilebilir.
+   Residual:
+     solar_loop_residual_K = TsolarNext_K - TsolarIn_K
+
+2. Condenser/preheater/CT loop:
+   ORC condenser cold-water inlet TcwIn_C tahmin edilir.
+   ORC condenser outlet TcwCondOut_C olur.
+   Preheater varsa bu suyu sogutur ve RO feed'i isitir.
+   CT gerekirse kalan sicakligi hedef T_cw_target_C civarina dusurur.
+   CT outlet TcwNext_C bir sonraki loop tahminidir.
+   Residual:
+     cw_loop_residual_K = TcwNext_C - TcwIn_C
+
+Ic iterasyon:
+
+  for iter = 1:cfg.coupling.max_iter
+      localSolveOneCouplingIteration(...)
+      if abs(solar_residual) <= tol_solar_K ve
+         abs(cw_residual) <= tol_cw_K:
+         converged = true
+         break
+      degilse:
+         TsolarIn_K = relax(old, next)
+         TcwIn_C = relax(old, next)
+  end
+
+Varsayilan:
+
+  max_iter = 12
+  tol_solar_K = 1.0
+  tol_cw_K = 0.25
+  relax = 1.0
+
+Saat sonrasi warm-start:
+
+  TsolarGuess_K = onceki TsolarNext_K
+  TcwGuess_C = onceki TcwNext_C
+  warmStartOp = onceki feasible ORC operating input
+  SolarSearchState = onceki solar flow factor/cozum cache'i
+  PHWasOn = onceki preheater_on
+
+
+8. SOLAR FIELD HESAPLARI
+------------------------
+
+Aktif dosya:
+
+  Solar_Field/solar_field_ptc_v1.m
+
+Amac:
+  Eski monolitik PTC kodundan ayrilmis PTC-only modeldir. ORC, condenser,
+  exergy ve plotting katmani yoktur.
+
+Girdi struct:
+
+  SolarInput.DNI_Wm2
+  SolarInput.T_amb_C veya T_amb_K
+  SolarInput.WindSpd_ms
+  SolarInput.T_HTF_in_K
+  SolarInput.V_Lmin_1module
+  SolarInput.solver_cache optional
+
+Config:
+
+  SolarConfig.min_DNI_Wm2
+  SolarConfig.min_useful_heat_W
+  SolarConfig.T_HTF_in_K
+  SolarConfig.V_Lmin_1module
+  SolarConfig.field.N_series
+  SolarConfig.field.N_parallel
+  SolarConfig.ptc.*
+  SolarConfig.Nusselt_multiplier
+  SolarConfig.sigma
+
+PTC geometri varsayilanlari:
+
+  W = 5.0 m
+  L = 7.8 m
+  Aa = 39.0 m2
+  Dri = 66 mm
+  Dro = 70 mm
+  Dci = 109 mm
+  Dco = 115 mm
+  eps_c = 0.86
+  r_mirror = 0.83
+  tau_cover = 0.95
+  alpha_abs = 0.96
+  gamma_int = 1.00
+  K_theta = 1.0
+  eta_opt = r_mirror*tau_cover*alpha_abs*gamma_int*K_theta
+
+Seri/paralel mantik:
+
+  Ns = field.N_series
+  Np = field.N_parallel
+
+Her paralel kolda Ns adet modul seri cozulur. Tek koldaki useful heat
+toplanir, toplam field heat Np ile carpilir. Pressure drop seri moduller
+boyunca toplanir; paralel kollarda ayni string dP kabul edilir.
+
+Tek modul fsolve bilinmeyenleri:
+
+  Tr   absorber/receiver sicakligi [K]
+  Tc   cover sicakligi [K]
+  Tout HTF outlet sicakligi [K]
+
+Residual denklemleri:
+
+  F1 = QlossR2C - QlossC2A
+  F2 = Qu - QuConv
+  F3 = Qabs - Qu - QlossR2C
+
+Temel ifadeler:
+
+  Qs = Aa * Gb
+  Qabs = Qs * eta_opt
+  Qu = mdot * cp * (Tout - Tin)
+  Re = 4*mdot/(pi*Dri*mu)
+  Pr = mu*cp/k
+  Nu0 = 0.023*Re^0.8*Pr^0.4
+  Nu = Nusselt_multiplier * Nu0
+  h = Nu*k/Dri
+  QuConv = h*Ari*(Tr - Tfm)
+  Tfm = 0.5*(Tin + Tout)
+  eps_r = 0.05599 + 1.039e-4*Tr + 2.249e-7*Tr^2
+  Tsky = 0.0553*Tamb^1.5
+  hout = 4*Vwind^0.58*Dco^(-0.42)
+  QlossR2C = Aro*sigma*(Tr^4 - Tc^4) /
+             ((1/eps_r) + ((1-eps_c)/eps_c)*(Aro/Aci))
+  QlossC2A = Aco*hout*(Tc-Tamb) + Aco*sigma*eps_c*(Tc^4-Tsky^4)
+
+HTF:
+
+  Syltherm800 property hesabi ortak ORC_v23/syltherm800_properties_v2.m
+  uzerinden yapilir. Bu fonksiyon persistent cache ile rho(T), cp(T),
+  mu(T), k(T), h(T) ve T(h) interpolantlarini bir kez hazirlar. Solar alan
+  ve ORC stream property hesaplari ayni tabloyu kullanir.
+
+  Eski davranista h(T) her cagrida 80 nokta cp integrali ile, T(h) ise
+  fzero + tekrarli h(T) residual degerlendirmesi ile cozulebiliyordu. Aktif
+  davranista h(T) ve T(h) tek interpolasyon cagrisi ile gelir.
+
+Pressure drop:
+
+  V_m3s = V_Lmin_1module*1e-3/60
+  mdot = rho*V_m3s
+  u = mdot/(rho*Aflow)
+  fr = 1/(0.79*log(Re)-1.64)^2
+  dP = fr*(L/Dri)*(0.5*rho*u^2)
+
+Solar output:
+
+  Q_useful_W
+  T_HTF_in_K
+  T_HTF_out_K
+  mdot_HTF_kg_s
+  dP_HTF_Pa
+  aperture_area_m2
+  N_series
+  N_parallel
+  ptc_field
+  solver_cache
+  feasible
+  status
+
+Solar off:
+
+  DNI < min_DNI_Wm2 ise Q_useful_W=0, mdot=0, T_out=T_in,
+  feasible=false, status=SOLAR_OFF.
+
+
+9. SOLAR FLOW CONTROL KARAR ALGORITMASI
+---------------------------------------
+
+Flow control system_hourly_coupled_solver_v1.m icindedir:
+
+  localSelectSolarOperatingPoint
+
+Adaylar:
+
+  factors = unique([cfg.solar.flow_control.factor_list, 1.0])
+  V_Lmin_1module = Vref * factor
+
+Adaptive local search:
+
+  Eger onceki saat gecerlidir ve DNI/Tin degisimi kucukse sadece son
+  secilen factor cevresindeki local_neighbor_steps kadar komsu denenir.
+
+Full search'e dusme nedenleri:
+
+  - Secilen local aday local araligin kenarindaysa
+  - Secilen aday feasible degilse
+  - Tout max limite veya min banda cok yakinsa
+  - Weather/Tin degisimi buyukse
+  - Search state gecersizse
+
+Adaptive fallback optimizasyonu:
+
+  Local search yapildiktan sonra full search gerekirse, local search'te
+  zaten cozulmus factor adaylari tekrar cozulmez. Full search yalniz eksik
+  factor listesini cozer ve local/full candidate listeleri birlestirilir.
+
+Aday feasible kosulu:
+
+  SolarOut.feasible true
+  deltaT_K >= min_deltaT_gain_K
+  ToutC <= T_out_max_C
+
+Secim:
+
+  Once feasible ve Tout [T_out_min_C, T_out_max_C] bandindaki adaylara bakilir.
+  selection_mode closest_target ise hedefe en yakin Tout secilir.
+  Aksi halde max_heat_below_limit mantigi kullanilir:
+    Quseful yuksek, hedeften sapmasi kucuk aday tercih edilir.
+
+Guard:
+
+  ToutC > T_out_max_C ise SolarOut infeasible, status TEMP_LIMIT_HIGH.
+  deltaT_K < min_deltaT_gain_K ise status LOW_SOLAR_GAIN.
+
+Saatlik output diagnostikleri:
+
+  solar_flow_factor
+  solar_V_Lmin_1module
+  solar_flow_status
+  solar_flow_search_status
+  solar_flow_candidates_evaluated
+  solar_flow_full_search_used
+  solar_solver_warm_start_used
+
+Not:
+  solar_flow_candidates_evaluated saat icindeki coupling iterasyonlari
+  boyunca accumulate edilir. Eski davranistaki gibi son iterasyonun aday
+  sayisini overwrite etmez.
+
+
+10. ORC STAGE-1 TASARIM
+-----------------------
+
+Ana dosya:
+
+  ORC_v23/orc_stage1_sizing.m
+
+Stage-1 nominal ORC termodinamik halini cozer ve evaporator/condenser STHE
+trenlerini boyutlandirir. Donen geometri Stage-2 icin frozen kabul edilir.
+
+Termodinamik cycle:
+
+  ORC_v23/orc_thermo_design.m
+
+Zorunlu girdiler:
+
+  systemInput.orc_P_evap_des
+  systemInput.orc_P_cond_des
+
+Boyut spec:
+
+  systemInput.orc_W_nom veya systemInput.orc_mdot_des
+
+Hidrolik dP girdileri:
+
+  orcHydraulic.orc_dp_evap_wf
+  orcHydraulic.orc_dp_cond_wf
+
+Basinc tanimlari:
+
+  P_orcevap = turbine inlet / evaporator outlet pressure
+  P_orccond = pump inlet / condenser outlet pressure
+  P_orcpump_out = P_orcevap + dp_evap_wf
+  P_orcturb_out = P_orccond + dp_cond_wf
+
+Cycle kabulleri:
+
+  turbine inlet mode = sat_vapor
+  condenser outlet mode = sat_liquid
+  subcritical ORC
+
+Temel hesaplar:
+
+  h_pump_in = h(P_cond, Q=0)
+  s_pump_in = s(P_cond, Q=0)
+  h_pump_out_s = h(P_pump_out, s_pump_in)
+  h_pump_out = h_pump_in + (h_pump_out_s-h_pump_in)/eta_pump
+
+  h_turb_in = h(P_evap, Q=1)
+  s_turb_in = s(P_evap, Q=1)
+  h_turb_out_s = h(P_turb_out, s_turb_in)
+  h_turb_out = h_turb_in - eta_turb*(h_turb_in-h_turb_out_s)
+
+  w_turb = h_turb_in - h_turb_out
+  w_pump = h_pump_out - h_pump_in
+  w_net = w_turb - w_pump
+  q_evap = h_turb_in - h_pump_out
+  q_cond = h_turb_out - h_pump_in
+
+  mdot_orc = W_nom / w_net  veya verilen mdot
+  W_orcnet = mdot_orc*w_net
+  Q_orcevap = mdot_orc*q_evap
+  Q_orccond = mdot_orc*q_cond
+  eta_orc_th = W_orcnet/Q_orcevap
+
+Energy balance:
+
+  Q_orcevap - W_orcnet - Q_orccond
+
+Hydraulic feedback:
+
+  orc_hydraulic_feedback.m aktifse Stage-1 boyunca su adimlari tekrarlar:
+    1. Mevcut evaporator/condenser wf dP tahminiyle thermo solve
+    2. Evaporator ve condenser STHE yeniden size edilir
+    3. Hesaplanan wf dP degerleri under-relaxation ile yeni tahmin olur
+    4. relChange <= orc_tol_hydraulic_rel olunca convergence
+    5. Final pass ve relaxed finalRel check yapilir
+
+
+11. ORC STHE TASARIM VE RATING
+------------------------------
+
+Evaporator design:
+
+  ORC_v23/orc_evaporator_design.m
+
+Duty split:
+
+  Q_orcevap_pre = mdot_orc * max(0, h_f(Pevap)-h_pump_out)
+  Q_orcevap_boil = mdot_orc * max(0, h_g(Pevap)-h_f(Pevap))
+
+Her fiziksel module preheating zone + boiling zone olarak temsil edilir.
+orc_sthe_parallel_sizing.m uygun N_parallel, Nt, Ltube ve geometriyi arar.
+
+Condenser design:
+
+  ORC_v23/orc_condenser_design.m
+
+Duty split:
+
+  Q_orccond_dsh = mdot_orc * max(0, h_turb_out-h_g(Pcond))
+  Q_orccond_2ph = mdot_orc * max(0, h_g(Pcond)-h_f(Pcond))
+
+Her fiziksel module desuperheating zone + condensation zone olarak temsil
+edilir.
+
+ORC STHE cekirdegi:
+
+  orc_sthe_geometry.m
+  orc_sthe_shell_singlephase.m
+  orc_sthe_tube_singlephase.m
+  orc_sthe_boiling.m
+  orc_sthe_condensation.m
+  orc_sthe_shell_twophase_dp.m
+  orc_sthe_parallel_sizing.m
+
+Feasibility:
+
+  orc_check_feasibility.m enerji dengesi, HX sizing/approach/area ve temel
+  tasarim flaglerini merkezi olarak toplar.
+
+
+12. ORC STAGE-2 / OFF-DESIGN DISPATCH
+-------------------------------------
+
+Aktif saatlik sistemde ORC cagrisi:
+
+  orc_offdesign_dispatch(orcDesign, hotStream, coldStream, op, orcConfigStep)
+
+Eger cfg.orc.operating_mode dispatch degilse:
+
+  orc_offdesign_rating(...)
+
+offdesign_rating:
+
+  Frozen geometry zorunludur. Her operating point icin:
+    1. P_evap, P_cond, mdot_orc veya W_nom alinir
+    2. Thermo solve
+    3. Fixed-geometry evaporator rating
+    4. Fixed-geometry condenser rating
+    5. Working-fluid dP fixed-point iteration
+    6. feasible = hydraulic converged + evap feasible + cond feasible + energy balance OK
+
+Hata korumasi:
+
+  config.orc_stage2_returnInfeasibleOnError true ise property/numerical hata
+  yillik kosuyu durdurmaz, guarded-infeasible step dondurur.
+
+dispatch algoritmasi:
+
+  ORC_v23/orc_offdesign_dispatch.m
+
+Amac:
+  Sabit geometri icin feasible ve net gucu pozitif tek operating point bulmak.
+
+Candidate building:
+
+  Pev0 = design veya warm/current P_evap
+  Pco0 = design veya warm/current P_cond
+  md0  = design veya warm/current mdot
+
+Candidate'lar mdotFactor, PevapFactor, PcondFactor kombinasyonlaridir.
+
+Stress-aware ordering:
+
+  sourceStress:
+    Hot stream T_in design'dan dusuk veya mdot dusukse.
+
+  sinkStress:
+    Cold stream T_in design'dan yuksek veya mdot dusukse.
+
+  sourceStress varsa low-Pevap adaylari erken denenir.
+  sinkStress varsa high-Pcond adaylari erken denenir.
+  combo stress varsa her iki rahatlatma birlikte denenir.
+
+Early coverage tier:
+
+  orc_dispatch_coverageMdotFactors ile moderate part-load adaylari erken
+  araya sokulur.
+
+Warm start:
+
+  Onceki feasible ORC step'in P_evap, P_cond, mdot ve stream metadata'si
+  kaydedilir. Dis boundary benzerse warm-start candidate ikinci siraya
+  alinir. Benzerlik limitleri:
+    orc_stage2_dispatch_warmStart_Ttol_K
+    orc_stage2_dispatch_warmStart_mdotRelTol
+
+Prescreen:
+
+  localThermoPrescreen once ucuz thermo ve kapasite kontrolu yapar.
+
+  Fail status ornekleri:
+    prescreen-low-power
+    prescreen-source-cold
+    prescreen-sink-hot
+    prescreen-hot-capacity
+    prescreen-cold-capacity
+    prescreen-guarded
+
+Capacity prescreen:
+
+  Hot stream entalpi kapasitesi:
+    Q_hot_cap = mdot_hot*(h_hot_in-h_hot_limit)*tolerance
+
+  Cold stream entalpi kapasitesi:
+    Q_cold_cap = mdot_cold*(h_cold_limit-h_cold_in)*tolerance
+
+  ORC Q_evap veya Q_cond bu kapasiteyi asarsa aday rating'e gitmeden elenir.
+
+Fast screening:
+
+  orc_dispatch_fastScreening true ise once az iterasyonlu HX rating yapilir.
+  Feasible gorunen secili aday sonra exact validation ile yeniden rating edilir.
+
+Preheater guard:
+
+  cfg.preheater.enforce_cond_out_above_feed true ise
+  orc_dispatch_preheaterGuardEnabled aktiflesir ve condenser outlet sicakligi
+  feed+margin altinda kalan ORC adaylari reddedilebilir.
+
+Selected status:
+
+  Feasible aday bulunursa:
+    orc_status = dispatch-on
+
+  Bulunamazsa:
+    orc_status = dispatch-off
+    orc_dispatch.candidateLog nedenleri saklar.
+
+Sistem cozumcu bu loglardan orc_off_reason kolonunu turetir:
+
+  ON
+  SOLAR_OFF
+  SOURCE_TOO_COLD
+  SINK_TOO_HOT
+  HOT_STREAM_CAPACITY
+  COLD_STREAM_CAPACITY
+  MIN_POWER_OR_LOW_NET_WORK
+  PREHEATER_COND_OUT_GUARD
+  NUMERICAL_OR_PROPERTY_GUARD
+  EVAPORATOR_PINCH_LIMIT
+  CONDENSER_PINCH_LIMIT
+  EVAPORATOR_AREA_LIMIT
+  CONDENSER_AREA_LIMIT
+  NO_FEASIBLE_DISPATCH_CANDIDATE
+
+Diagnostic not:
+
+  system_hourly_coupled_solver_v1 localOrcDispatchDiagnostics, ORC feasible
+  yani dispatch-on saatlerinde de orc_dispatch candidate log'unu okur.
+  Bu nedenle orc_dispatch_n_candidates_available,
+  orc_dispatch_n_candidates_evaluated ve orc_dispatch_best_* kolonlari
+  yalniz ORC_OFF saatleri icin degil, ON saatleri icin de dolabilir.
+
+
+13. ORC HOT STREAM VE PROPERTY BACKEND
+--------------------------------------
+
+Aktif default:
+
+  cfg.orc.hot_stream_fluid = 'Syltherm800'
+
+Bu durumda system_hourly_coupled_solver_v1:
+
+  hot.T_in = SolarOut.T_HTF_out_K
+  hot.mdot = SolarOut.mdot_HTF_kg_s
+
+  orc_stream_properties.m Syltherm800 icin ortak syltherm800_properties_v2
+  backend'ini kullanir. Desteklenen ozellikler:
+
+  H / enthalpy
+  T / temperature
+  D / density
+  C / cp
+  V / viscosity
+  L / thermal conductivity
+  STATE / PROPS / BUNDLE
+
+Syltherm entalpi:
+
+  Tref = 273.15 K
+  h(T) = precomputed integral cp(T) dT, griddedInterpolant ile lookup
+
+T(h):
+
+  precomputed h grid'i uzerinden direct T(h) interpolation. Runtime fzero
+  kullanilmaz.
+
+ORC config/property optimizasyonu:
+
+  run_single_configuration_core_v1, ORC config'i tasarim basinda
+  orc_finalize_config ile default'layip freeze eder. orc_default_config,
+  orc_config_finalized flag'ini gordugunde tekrar default zincirine girmez.
+
+  orc_properties.m artik STATE / BUNDLE / PROPS isteklerini destekler:
+
+    props = orc_properties(config,'STATE','P',P,'H',h,fluid)
+    props.rho, props.cp, props.mu, props.k, props.h, props.T
+
+  Fluid-grid backend'inde Ph, Ps ve PT tablolari icin persistent
+  griddedInterpolant nesneleri tutulur; aktif ORC STHE rating path'lerinde
+  ayni state icin rho/cp/mu/k/h ayri ayri istenmek yerine bundle lookup
+  kullanilir.
+
+Water comparison mode:
+
+  cfg.orc.hot_stream_fluid = 'Water' yapilirsa solar useful heat,
+  water-equivalent mdot'a cevrilir. Bu sadece karsilastirma/debug icindir.
+
+ORC working fluid properties:
+
+  orc_properties.m CoolProp-benzeri arayuzdur. Fluid-grid dosyalari:
+    ORC_v23/thermoDB_R1233zd(E)_V5.mat
+    ORC_v23/thermoDB_Water_V5.mat
+
+Fluid_grid/THERMODB_V5_TEKNIK_ACIKLAMA.txt bu .mat semasini ayrintili
+anlatir.
+
+
+14. SOLAR PUMP VE SOLAR RETURN SINK
+-----------------------------------
+
+Solar pump:
+
+  localApplySolarPump
+
+Pressure drop:
+
+  dP_solar_loop_Pa = SolarOut.dP_HTF_Pa + evaporator_rate.dp_orchtf
+
+Power:
+
+  W_solar_pump_W = mdot_HTF * dP_solar_loop /
+                   (rho_HTF * eta_hydraulic * eta_motor)
+
+rho_HTF:
+
+  orc_stream_properties ile hotStream uzerinden alinir. Hata olursa 850
+  kg/m3 fallback.
+
+Bu guc ORC net gucunden dusulerek RO'ya kalan elektrik hesaplanir:
+
+  WorcNetW = W_ORC_net_W - W_solar_pump_W
+
+Son RO dispatch icinde buna CT fan, CW circulation pump ve seawater feed
+pump tuketimleri de uygulanir:
+
+  W_available_for_RO_W = WorcNetW
+                       - W_CT_fan_W
+                       - W_cw_pump_W
+                       - W_sw_feed_pump_W
+
+Solar return sink:
+
+  localApplySolarReturnSink
+
+Eger cfg.storage.solar_return_sink_enabled true ve ORC evaporator hot-side
+outlet sicakligi TsolarIn_K ustundeyse:
+
+  Q_solar_return_sink_W = mdot_HTF * cp_HTF * (Traw - TinTarget)
+  TsolarNext_K = TinTarget
+
+Bu, kapali solar loop'un collector inlet kosuluna donmesini saglayan gecici
+storage/PCM placeholder mantigidir.
+
+
+15. PREHEATER TASARIMI
+----------------------
+
+Aktif design:
+
+  Heat_Exchangers/preheater_sthe_design_v1.m
+
+Amac:
+
+  ORC condenser cooling-water outlet'indeki isiyi, RO feed deniz suyuna
+  aktarmak. Iki akis fiziksel olarak ayridir.
+
+Konvansiyon:
+
+  Hot side/shell: ORC condenser-loop water
+  Cold side/tube: seawater
+
+Design girdileri localDesignHeatRejectionTrain icinde kurulur:
+
+  T_hot_in_C = design condenser-water outlet
+  T_cold_in_C = cfg.preheater.T_sw_design_C
+  T_cold_out_target_C = localPreheaterTargetC(cfg,TswDesign)
+  mdot_hot_kg_s = cfg.orc.mdot_cw_design_kg_s
+  mdot_cold_kg_s = N_train_total * Qf_train_m3h * rho_seawater / 3600
+
+Not:
+  T_sw_design_C finite degilse, geriye uyumluluk icin ilk seawater profili
+  sicakligi fallback olarak kullanilir. Normal aktif varsayilan 25 C'dir.
+
+Design condenser-water outlet yaklasimi:
+
+  Qcond = abs(orcDesign.orc_thermo.Q_orccond)
+  TcwHotC = TcwInC + Qcond/(mdot_cw_design*cp_hot)
+
+Target clip:
+
+  TcOutRequested = min(input target, T_cold_out_max_C)
+  TcOutTarget = min(TcOutRequested, ThIn - dT_min_K)
+
+Eger target approach ile kisitlanirsa:
+
+  target_limited_by_approach = true
+  status = TARGET_APPROACH_LIMITED
+
+Q design:
+
+  Qtotal = mdotCold * cp_cold * (TcOutTarget - TcIn)
+
+Hot outlet:
+
+  ThOut = ThIn - Qtotal/(mdotHot*cp_hot)
+
+Approach kontrolu:
+
+  dT1 = ThIn - TcOutTarget
+  dT2 = ThOut - TcIn
+  min(dT1,dT2) >= dT_min_K olmalidir.
+
+LMTD:
+
+  L = (DT1-DT2)/log(DT1/DT2)
+
+Geometri aramasi:
+
+  Npar = 1..N_parallel_max
+  Nt = Nt_list
+  once Npar icinde en dusuk alanli feasible candidate aranir,
+  ilk feasible Npar bulunduysa daha buyuk Npar'a gecilmeden kabul edilir.
+
+Candidate:
+
+  preheater_sthe_core_v1('geometry', geometry_family, Nt, NaN, config)
+  shell_singlephase ve tube_singlephase ile h hesaplanir.
+  U = 1/(1/hShell + 1/hTube)
+  Areq = (Qtotal/Npar)/(U*LMTD)
+  LtubeReq = Areq/(pi*do*Nt)
+  Ltube = LtubeReq*(1 + designAreaMargin)
+
+Limitler:
+
+  Ltube min/max
+  Dshell min/max
+  pitch ratio
+  do/Dshell
+  baffle spacing
+
+Design output:
+
+  Q_design_W
+  A_design_m2
+  A_required_m2
+  UA_design_WK
+  U_design_Wm2K
+  N_parallel
+  Nt
+  Ltube_m
+  Dshell_m
+  geometry
+  dp_hot_Pa
+  dp_cold_Pa
+  shell
+  tube
+
+
+16. PREHEATER RUNTIME RATING VE KONTROL
+---------------------------------------
+
+Control:
+
+  system_hourly_coupled_solver_v1 localRunPreheaterControl
+
+Deadband:
+
+  dTAvailable = TcwHotC - TswRawC
+
+  dTAvailable >= deltaT_ON_K:
+    preheater on
+
+  dTAvailable <= deltaT_OFF_K:
+    preheater off
+
+  arada:
+    onceki saat PHWasOn korunur
+
+Runtime rating:
+
+  preheater_sthe_rating_v1.m
+
+Girdiler:
+
+  T_hot_in_C
+  T_cold_in_C
+  mdot_hot_kg_s
+  mdot_cold_kg_s
+  Q_available_W
+  T_cold_out_target_C
+  PHDesign frozen geometry
+
+Eger fixed geometry yoksa:
+
+  status = NO_FIXED_GEOMETRY
+  heat recovered = 0
+
+Eger thermal driving force yoksa:
+
+  ThIn <= TcIn + dT_min_K
+  status = NO_THERMAL_DRIVING_FORCE
+
+Effectiveness-NTU:
+
+  U = 1/(1/hShell + 1/hTube)
+  UA = U*A_design
+  C_hot = mdotHot*cp_hot
+  C_cold = mdotCold*cp_cold
+  Cmin = min(C_hot,C_cold)
+  Cmax = max(C_hot,C_cold)
+  Cr = Cmin/Cmax
+  NTU = UA/Cmin
+
+Counterflow effectiveness:
+
+  Cr ~= 1:
+    eps = (1-exp(-NTU*(1-Cr))) /
+          (1-Cr*exp(-NTU*(1-Cr)))
+
+  Cr == 1:
+    eps = NTU/(1+NTU)
+
+Heat limits:
+
+  Qntu = eps*Cmin*(ThIn-TcIn)
+  Qupper = min(Qntu, Q_available_W)
+  Qupper = min(Qupper, C_cold*(TcOutTarget-TcIn))
+  Qupper = max(0,Qupper)
+
+Approach-limited heat:
+
+  Binary search yoktur. Hot outlet ve cold outlet terminal approach
+  kisitlari analitik olarak ayni anda uygulanir:
+
+    Qapproach_max = max(0, min(C_hot,C_cold)*(ThIn - TcIn - dT_min_K))
+    Q = min(Qupper, Qapproach_max)
+
+Output:
+
+  Q_recovered_W
+  T_hot_out_C / T_cw_out_C
+  T_sw_out_C / T_RO_in_C
+  effectiveness
+  NTU
+  U_runtime_Wm2K
+  UA_runtime_WK
+  dp_hot_Pa
+  dp_cold_Pa
+  feasible
+  status
+
+
+17. PREHEATER STHE CORE
+-----------------------
+
+Aktif dosya:
+
+  Heat_Exchangers/preheater_sthe_core_v1.m
+
+Bu dosya ORC_v23 STHE single-phase geometri/shell/tube mantiginin lokal
+kopyasidir. Preheater runtime ORC helper fonksiyonlarini dogrudan cagirmasin
+diye ayrilmistir.
+
+Action arayuzu:
+
+  'default_config'
+  'geometry'
+  'tube_singlephase'
+  'shell_singlephase'
+
+Desteklenen geometri:
+
+  one shell pass
+  one tube pass
+  60 degree layout
+  condenser veya evaporator tube family
+
+Tube single-phase:
+
+  Re < 2300 ise Nu=3.66, fFanning=16/Re
+  Re >= 2300 ise Gnielinski benzeri Nu ve Blasius/benzeri friction kullanilir
+  dp = fDarcy*(L/di)*rho*v^2/2
+
+Shell single-phase:
+
+  Bell-Delaware benzeri ideal tube-bank heat transfer ve correction factor
+  yapisi kullanilir. Jc, Jl, Jb, Js, Jr ve dp correction factorleri hesaplanir.
+  Sealing strips ve equal baffle spacing baseline olarak Jb=fb=1, Js=fs=1.
+
+
+18. COOLING TOWER TASARIM VE RUNTIME
+------------------------------------
+
+Aktif dosyalar:
+
+  ct_default_config.m
+  ct_rate_design_point.m
+  ct_solve_fan_for_target.m
+  ct_offdesign_merkel.m
+  ct_merkel_number.m
+  ct_transfer_characteristic.m
+  ct_fan_power.m
+  ct_air_outlet_state.m
+  ct_water_consumption.m
+  ct_psychrometrics.m
+
+Config:
+
+  runtime model = merkel_classic
+  psychrometrics backend = correlation
+  water property backend = fluidgrid
+  fan model = affinity_cubic
+  transfer correlation = kloppers_trickle_normalized
+  merkel_n_intervals = 50
+  target_temperature_tolerance_C = 0.02
+  inverse_temperature_tolerance_C = 0.02
+  fan_ratio_tolerance = 1e-4
+
+Design:
+
+  ct_rate_design_point.m fixed/rated tower struct uretir.
+
+Design girdileri:
+
+  Q_rated_W
+  T_wb_rated_C
+  approach_rated_C
+  range_rated_C
+  mdot_water_rated
+  mdot_air_rated veya L_over_G_rated
+  W_fan_rated_W optional
+
+Rated temperatures:
+
+  T_w_out_rated_C = T_wb_rated_C + approach_rated_C
+  T_w_in_rated_C = T_w_out_rated_C + range_rated_C
+
+Rated water flow:
+
+  Eger verilmezse mdot_water_rated = Q_rated/(cp*range)
+
+Rated air:
+
+  Eger verilmezse mdot_air_rated = mdot_water_rated/L_over_G_rated
+
+Rated Merkel:
+
+  ct_merkel_number('forward', rated input)
+
+Fan rated:
+
+  Eger W_fan_rated_W verilmezse:
+    Q_rated_RT = Q_rated_kW/3.517
+    W_fan_rated_W = Q_rated_RT*hp_per_refrigeration_ton*745.7
+
+Runtime hedef cozum:
+
+  system cozumcu localRunCoolingTower:
+    eger TcwInC <= targetC ise CT gerekmez, status NOT_NEEDED.
+    aksi halde ct_psychrometrics bir kez hesaplanir, CTInput.air_in olarak
+    tasinir ve ct_solve_fan_for_target cagrilir.
+
+ct_solve_fan_for_target:
+
+  1. Ttarget >= Tin ise bypass, fan_ratio=0.
+  2. fan_ratio_max ile ct_offdesign_merkel denenir.
+     Hedefe inemiyorsa status AIRFLOW_LIMIT_TARGET_NOT_MET, feasible=false.
+  3. min_fan_ratio hedefi sagliyorsa status MIN_FAN_TARGET_MET.
+  4. Aksi halde fzero ile fan_ratio_star bulunur.
+     fzero TolX = cfg.ct.fan_ratio_tolerance.
+  5. status TARGET_MET, feasible=true.
+
+ct_offdesign_merkel:
+
+  Girdiler:
+    T_w_in_C
+    mdot_water
+    fan_ratio veya mdot_air
+    ambient T_db_C, T_wb_C/RH, P_atm_Pa
+
+  Steps:
+    1. CTInput.air_in varsa inlet air yeniden hesaplanmaz; yoksa
+       ct_psychrometrics ile inlet air.
+    2. ct_fan_power ile fan_ratio, mdot_air, W_fan_W.
+    3. Thermal driving force yoksa NO_THERMAL_DRIVING_FORCE.
+    4. Air flow yoksa NO_AIR_FLOW.
+    5. ct_transfer_characteristic ile Me_available.
+    6. ct_merkel_number('inverse') ile T_w_out_C.
+       inverse fzero TolX = cfg.ct.inverse_temperature_tolerance_C.
+    7. Q_rejected_W = mdot_water*cp*range_C.
+    8. ct_air_outlet_state ile saturated-exit air state.
+    9. ct_water_consumption ile evaporation/drift/blowdown/makeup.
+
+Water consumption:
+
+  mdot_evap = mdot_dry_air*(omega_out-omega_in)
+  drift cfg.ct.drift_fraction ile
+  blowdown cycles_of_concentration ile
+  makeup = evap + drift + blowdown
+
+CT duyarlilik araci:
+
+  CoolingTower/ct_solver_sensitivity_v1.m, 48 saatlik strict/fast
+  karsilastirma icin eklendi. Test edilen hizli ayar:
+
+    strict: merkel_n_intervals=100, target/inverse tol=1e-4 C
+    fast  : merkel_n_intervals=50,  target/inverse tol=0.02 C
+
+  48 saatlik testte max |dT_w_out| = 0.004218 C, status degisimi = 0,
+  runtime speedup = 1.18x goruldu. Bu nedenle system_config_v1 ve
+  ct_default_config defaultlari 50 / 0.02 C olarak guncellendi.
+
+System status:
+
+  CT status TARGET_MET, OK veya NOT_NEEDED ise CT ok sayilir.
+  CT hedefe inemez ama ORC/RO calisabiliyorsa system_status OK_CT_LIMITED
+  olabilir.
+
+18.1 COOLING-WATER VE SEAWATER AUX PUMPS
+
+Aktif fonksiyon:
+
+  system_hourly_coupled_solver_v1 localApplyRoAuxiliaryPumps
+
+CW circulation pump:
+
+  Su hattinda ORC condenser + preheater hot side + CT dolasir.
+  Cooling tower ic pressure drop su an ihmal edilir.
+
+  dP_cw_condenser_Pa = orc_condenser_rate.dp_orccw
+  dP_cw_preheater_hot_Pa = PHOut.dp_hot_Pa, yalniz preheater_on true iken
+  dP_cw_loop_Pa = dP_cw_condenser_Pa + dP_cw_preheater_hot_Pa
+
+  W_cw_pump_W = mdot_cw_design_kg_s*dP_cw_loop_Pa /
+                (rho_water*eta_hydraulic*eta_motor)
+
+Seawater feed pump:
+
+  Mevcut V1'de yalniz preheater cold-side dP'sini temsil eder.
+
+  dP_sw_preheater_cold_Pa = PHOut.dp_cold_Pa, yalniz preheater_on true iken
+  W_sw_feed_pump_W = mdot_sw_kg_s*dP_sw_preheater_cold_Pa /
+                     (rho_seawater*eta_hydraulic*eta_motor)
+
+RO elektrik butcesi:
+
+  W_available_for_RO_W = W_ORC_net_W
+                       - W_solar_pump_W
+                       - W_CT_fan_W
+                       - W_cw_pump_W
+                       - W_sw_feed_pump_W
+
+RO off, preheater off veya domain/infeasible/power-deficit sonucunda
+preheater fiziksel olarak kapaliysa seawater feed pump dP/guc sifir kalir.
+
+
+19. RO ANN SURROGATE
+--------------------
+
+Aktif runtime dosyasi:
+
+  RO_MATLAB_Model_v1_8_0_FINAL_DATASET/ro_predict_ann_surrogate_v1_9_1.m
+
+Aktif model dosyasi:
+
+  RO_ANN_models_v1_9_1.mat
+
+Runtime cache:
+
+  ro_predict_ann_surrogate_v1_9_1.m model dosyasini persistent cache ile
+  yukler. Ayni ModelFile path'iyle yapilan saatlik/aday cagrilarinda
+  RO_ANN_models_v1_9_1.mat tekrar tekrar load edilmez.
+
+Sistem cagrisi:
+
+  ROOut = ro_predict_ann_surrogate_v1_9_1( ...
+      cfg.ro.model_file, cfg.ro.Qf_train_m3h, T_RO_in_C, Cf_kg_m3, cfg.ro.R_target)
+
+ANN inputlari:
+
+  Qf_train_m3h
+  T_RO_in_C
+  Cf_kg_m3
+  R_target
+
+Cf_kg_m3 notu:
+
+  Cf_kg_m3, Practical Salinity degil, kg/m3 biriminde tuz konsantrasyonudur.
+  Ham CMEMS Salinity_CMEMS_native minimumu yaklasik 37.62 olsa da TEOS-10
+  density/Absolute Salinity donusumu sonrasi Cf_kg_m3 minimumu yaklasik
+  38.84 kg/m3 olur. Bu nedenle salinity domain kontrolu ham salinity ile
+  degil, RO-ready Cf_kg_m3 kolonu ile yapilmalidir.
+
+Hard deployment domain:
+
+  47.5 <= Qf_train_m3h <= 63.0
+  20.0 <= T_RO_in_C <= 45.0
+  38.5 <= Cf_kg_m3 <= 41.5
+  0.399 <= R_target <= 0.571
+
+Onemli kural:
+
+  Sistem kodu ANN inputlarini clamp etmez. Domain disi ise RO o saat icin
+  calismaz. Bu, extrapolation'i bilincli olarak yasaklar.
+
+Model parcalari:
+
+  Feasibility classifier:
+    Models.Feasibility.Net ve Threshold ile P_feasible -> ClassifierFeasible.
+
+  Performance regressors:
+    W_RO_train_kW
+    P1_opt_gauge_MPa
+    P2_opt_gauge_MPa
+
+  Hybrid Cp:
+    Cp ActiveClassifier, Cp MarginRegressor ve CpLimit=500 mg/L mantigi.
+    Boundary aktifse Cp=500 mg/L kabul edilir; aksi halde Cp=500-margin.
+
+Physics-derived outputs:
+
+  Qp_train_m3h = Qf_train_m3h * R_target
+  SEC_kWh_m3 = W_RO_train_kW / Qp_train_m3h
+
+Bunlar ANN tarafindan ayri regresyon olarak egitilmez.
+
+Boundary override:
+
+  Classifier infeasible dese bile:
+    in-domain
+    Cp boundary active
+    Cp <= 500 mg/L + tol
+    raw performance finite/physical
+  ise BoundaryFeasibleOverride true olabilir ve Feasible true yapilir.
+
+Masked outputs:
+
+  Feasible false ise W, P1, P2, Cp, Qp, SEC NaN yapilir.
+  Raw_* kolonlari diagnostik icin tutulur.
+
+Sistem icin kritik entegrasyon kuralari:
+
+  W_RO_train_kW tek train toplam RO elektrik tuketimidir.
+  Ayni RO pump/booster/PX gucleri sistemde ikinci kez eklenmemelidir.
+  N_train_running ile toplam guc:
+    W_RO_total_W = N_train_running * W_RO_train_kW * 1000
+  Toplam urun suyu:
+    Qp_total_m3h = N_train_running * Qp_train_m3h
+
+
+20. RO TREN DISPATCH ALGORITMASI
+--------------------------------
+
+Aktif fonksiyon:
+
+  system_hourly_coupled_solver_v1 localDispatchRoTrains
+
+Girdi:
+
+  Ntotal = round(cfg.ro.N_train_total)
+  TcwHotC = ORC condenser outlet
+  WorcNetW = ORC net after solar pump deduction
+  QcondW
+  PHDesign, CTDesign, CTConfig
+  orcCondDpCwPa = ORC condenser cooling-water dP
+  previousNtrain
+
+Candidate sirasi:
+
+  Eski davranis dogrudan Ntotal, Ntotal-1, ..., 1 aramasiydi.
+  Aktif davranis once previousNtrain varsa oradan baslar:
+
+    startCandidate = clamp(round(previousNtrain), 1, Ntotal)
+
+  Once startCandidate:Ntotal yukari yon denenir; bir reject gorulmeden once
+  bulunan son kabul edilebilir aday bestDispatch olarak tutulur. Gerekirse
+  sonra startCandidate-1:-1:1 asagi yon fallback denenir. previousNtrain yoksa
+  startCandidate=Ntotal olur.
+
+Algoritma:
+
+  for nTrain in candidateOrder
+      mdotSw = nTrain*Qf_train*rho/3600
+      preheater rating/control
+      RO ANN call for one train
+      if domain fail: remember firstDomainFail, continue
+      if ANN infeasible: remember firstInfeasible, continue
+      W_available_lower_bound = WorcNetW
+      if nTrain*W_RO_train > W_available_lower_bound:
+          remember firstPowerDeficit, continue
+      cooling tower fan solve
+      CW circulation pump ve seawater feed pump hesapla
+      W_available_for_RO = WorcNetW
+                         - W_CT_fan
+                         - W_cw_pump
+                         - W_sw_feed_pump
+      if W_available < nTrain*W_RO_train: remember firstPowerDeficit, continue
+      accept largest feasible powered nTrain
+  end
+
+  Boylece ANN domain disi veya ANN infeasible adaylar icin CT hic
+  cozulmez. Ayrica CT ve pompalar sifir kabul edilse bile RO gucu ORC netten
+  buyukse aday CT cozulmeden reddedilir. Yalniz domain/gecerlilik ve guc
+  lower-bound'u gecen adaylarda CT + pump hesaplari calisir.
+
+Basarili kabul:
+
+  RO_feasible = true
+  ro_status = OK
+  system_status = OK veya OK_CT_LIMITED
+
+Hic aday kabul olmazsa oncelik:
+
+  firstPowerDeficit varsa:
+    system_status = POWER_DEFICIT
+    ro_status = POWER_LIMIT_NO_TRAIN
+
+  degilse firstDomainFail varsa:
+    system_status = RO_DOMAIN_FAIL
+    ro_status = RO_DOMAIN_FAIL
+
+  degilse firstInfeasible varsa:
+    system_status = RO_INFEASIBLE
+    ro_status = RO_INFEASIBLE
+
+Onemli fiziksel duzeltme:
+
+  Hic aday kabul edilmezse secilen Dispatch, domain/infeasible/power-deficit
+  adayinin preheater/CT durumunu sistemde birakmaz. RO fiziksel olarak off
+  kabul edilir:
+
+    N_train_running = 0
+    W_RO_total_W = 0
+    Qp_total_m3h = 0
+    preheater_on = false
+    Q_preheater_W = 0
+    T_RO_in_C = raw seawater temperature
+
+  Bu durumda ORC condenser heat, preheater'a phantom olarak aktarilmaz;
+  TcwHotC dogrudan cooling tower hattina gider. Boylece RO_DOMAIN_FAIL
+  saatlerinde 10-train veya benzeri aday debilerinden kalan sahte preheater
+  duty, CT NOT_NEEDED ve CW return degerleri rapora sizmaz.
+
+N_train_total < 1:
+
+  system_status = NO_RO_TRAIN_INSTALLED
+  ro_status = NO_RO_TRAIN_INSTALLED
+
+
+21. THERMAL STORAGE PLACEHOLDER
+-------------------------------
+
+Aktif dosya:
+
+  Thermal_Storage/storage_water_tank_v1.m
+
+Bu model yalnizca fazla solar isiyi charge eder. Discharge yoktur.
+
+State:
+
+  E_max_J
+  E_J
+  SOC
+  T_C
+
+Kapasite:
+
+  E_max_J = volume_m3*rho*cp*(T_max_C-T_min_C)
+
+Initial:
+
+  T_initial_C min/max arasina clamp edilir.
+  SOC0 = (T0-T_min)/(T_max-T_min)
+
+Runtime:
+
+  Qreq = max(0, Input.Q_charge_request_W)
+  Ereq = Qreq*dt_s
+  capacityLeft = E_max - E
+  Echarge = min(Ereq, capacityLeft)
+  Ecurtailed = Ereq - Echarge
+
+Output:
+
+  Q_charge_request_W
+  Q_charge_W
+  Q_curtailed_W
+  E_charge_kWh
+  E_curtailed_kWh
+  SOC
+  T_C
+  E_stored_kWh
+  status
+
+Status:
+
+  DISABLED
+  IDLE
+  CHARGING
+  FULL_CURTAILED
+
+System baglantisi:
+
+  Q_solar_excess_W = max(Q_solar_useful_W - Q_ORC_evap_W,
+                         Q_solar_return_sink_W)
+  storage_water_tank_v1 bu Q_solar_excess_W istegini charge etmeye calisir.
+
+
+22. YILLIK HABERLESME VE VERI AKISI
+-----------------------------------
+
+Bir saat icindeki aktif veri alisverisi:
+
+1. WeatherData(it):
+   DNI_Whm2, T_amb_C, WindSpd_ms -> Solar
+   T_amb_C, T_wb_C, RH_pct, Patm_Pa -> CT
+
+2. SeawaterData(it):
+   SeaWater_Temperature_C -> Preheater cold inlet, RO inlet baseline
+   Cf_kg_m3 -> RO ANN
+
+   Geriye uyumluluk icin Salinity_kg_m3 ve Salinity_CMEMS_native kolonlari
+   localSeawaterConcentration tarafindan kabul edilir; fakat aktif sistemde
+   TEOS-10 RO-ready profil kullanildigi icin Cf_kg_m3 birinci ve dogru
+   kaynaktir.
+
+3. Solar:
+   SolarOut.T_HTF_out_K, mdot_HTF_kg_s -> ORC hotStream
+   SolarOut.Q_useful_W, dP_HTF_Pa -> heat/pump/storage bookkeeping
+
+4. ORC:
+   hotStream = Syltherm800 solar outlet
+   coldStream.T_in = current condenser-loop return
+   Outputs:
+     W_orcnet
+     Q_orcevap
+     Q_orccond
+     evaporator hot outlet -> solar loop next
+     condenser water outlet -> preheater/CT/RO dispatch
+     pressure and HX diagnostics
+
+5. Solar pump:
+   dP_solar_field + dP_orc_evap_hot -> W_solar_pump
+   W_orcnet - W_solar_pump -> RO/CT electrical budget base
+
+6. Preheater:
+   ORC condenser outlet water + seawater flow for candidate nTrain.
+   Output T_RO_in_C goes to RO ANN.
+   Output T_cw_out_C goes to CT.
+   Preheater hot/cold dP values go to auxiliary pump bookkeeping only when
+   preheater_on is true.
+
+7. CT:
+   T_cw_after_preheater -> T_CT_out_C
+   W_CT_fan_W subtracts from RO available power.
+   makeup water subtracts from net product water summary.
+
+8. Auxiliary pumps:
+   ORC condenser cooling-water dP + active preheater hot-side dP ->
+   W_cw_pump_W.
+   Active preheater cold-side dP -> W_sw_feed_pump_W.
+   Both subtract from W_available_for_RO_W.
+
+9. RO:
+   T_RO_in_C, Cf, Qf_train, R_target -> ANN.
+   nTrain chosen by train dispatch.
+
+10. Storage:
+   Solar excess and return sink heat -> water tank placeholder.
+
+11. Loop closure:
+   T_orc_hot_return_C -> next solar inlet residual/guess
+   T_CT_out_C -> next condenser inlet residual/guess
+
+
+23. HOURLY OUTPUT KOLONLARI
+---------------------------
+
+system_hourly_coupled_solver_v1.m Hourly table kolonlari:
+
+Time/input:
+  hour
+  source_hour
+  DNI_Whm2
+  T_amb_C
+  T_wb_C
+  T_sw_raw_C
+  Cf_kg_m3
+
+Solar/storage:
+  Q_solar_useful_W
+  Q_solar_excess_W
+  Q_solar_return_sink_W
+  Q_storage_charge_W
+  Q_solar_curtailed_W
+  storage_SOC
+  storage_T_C
+  storage_E_stored_kWh
+  solar_flow_factor
+  solar_V_Lmin_1module
+
+Solar pump and pressure drops:
+  W_solar_pump_W
+  dP_solar_field_Pa
+  dP_orc_evap_hot_Pa
+  dP_solar_loop_Pa
+
+Cooling-water/seawater auxiliary pumps:
+  dP_cw_condenser_Pa
+  dP_cw_preheater_hot_Pa
+  dP_cw_loop_Pa
+  W_cw_pump_W
+  dP_sw_preheater_cold_Pa
+  W_sw_feed_pump_W
+
+Solar/ORC loop temperatures:
+  T_solar_loop_in_C
+  T_solar_loop_out_C
+  T_orc_hot_return_raw_C
+  T_orc_hot_return_C
+
+ORC:
+  W_ORC_net_W
+  Q_ORC_evap_W
+  Q_ORC_cond_W
+  P_ORC_evap_Pa
+  P_ORC_cond_Pa
+  effectiveness_evaporator
+  effectiveness_condenser
+
+Condenser/preheater:
+  T_cw_loop_in_C
+  T_cw_cond_out_C
+  T_cw_cond_out_guard_C
+  T_cw_cond_out_guard_margin_K
+  DeltaT_preheater_available_K
+  preheater_on
+  Q_preheater_W
+  T_RO_in_C
+  T_cw_after_preheater_C
+  effectiveness_preheater
+
+Cooling tower:
+  T_CT_out_C
+  W_CT_fan_W
+  Q_CT_rejected_W
+  CT_makeup_m3h
+  CT_mdot_makeup_kg_s
+
+RO/electrical:
+  W_available_for_RO_W
+  N_train_total
+  N_train_running
+  W_RO_total_W
+  Qp_total_m3h
+
+RO ANN diagnostics:
+  RO_InTrainingDomain
+  RO_ClassifierFeasible
+  RO_BoundaryFeasibleOverride
+  RO_ANN_Feasible
+  RO_P_feasible
+  RO_Qp_train_m3h
+  RO_W_train_kW
+  RO_SEC_kWh_m3
+  RO_Cp_mg_L
+  RO_P1_opt_gauge_MPa
+  RO_P2_opt_gauge_MPa
+  RO_P_CpBoundary
+  RO_raw_Qp_train_m3h
+  RO_raw_W_train_kW
+  RO_raw_SEC_kWh_m3
+  RO_raw_Cp_mg_L
+  RO_raw_P1_opt_gauge_MPa
+  RO_raw_P2_opt_gauge_MPa
+
+Feasibility/convergence/status:
+  ORC_feasible
+  RO_feasible
+  coupling_converged
+  N_coupling_iter
+  solar_loop_residual_K
+  cw_loop_residual_K
+  solar_status
+  solar_flow_status
+  solar_flow_search_status
+  solar_flow_candidates_evaluated
+  solar_flow_full_search_used
+  solar_solver_warm_start_used
+  storage_status
+  orc_status
+  preheater_status
+  ct_status
+  ro_status
+  system_status
+  orc_off_reason
+  orc_dispatch_n_candidates_available
+  orc_dispatch_n_candidates_evaluated
+  orc_dispatch_best_status
+  orc_dispatch_best_W_net_W
+  orc_dispatch_best_evap_A_ratio
+  orc_dispatch_best_cond_A_ratio
+  orc_dispatch_best_evap_pinch_K
+  orc_dispatch_best_cond_pinch_K
+
+Timing:
+  t_solar_select_s
+  t_orc_dispatch_s
+  t_ro_heat_rejection_dispatch_s
+  t_ct_dispatch_s
+  t_ro_dispatch_s
+  t_storage_s
+  t_hour_s
+
+Profiling counters:
+  solar_solver_calls_total
+  ORC_dispatch_calls_total
+  ORC_candidate_evaluations_total
+  RO_ANN_calls_total
+  CT_solver_calls_total
+  preheater_rating_calls_total
+
+
+24. SUMMARY HESAPLARI
+---------------------
+
+run_single_configuration_core_v1.m localSummarize:
+
+dt_h = cfg.sim.dt_s/3600
+
+ORC operating:
+  orcOn = Hourly.ORC_feasible & Hourly.orc_status == "dispatch-on"
+
+RO operating:
+  roOk = Hourly.RO_feasible & Hourly.ro_status == "OK" & N_train_running > 0
+
+Enerjiler:
+  E_ORC_net_kWh = sum(W_ORC_net_W(orcOn))*dt_h/1000
+  E_solar_pump_kWh = sum(W_solar_pump_W)*dt_h/1000
+  E_RO_kWh = sum(W_RO_total_W(roOk))*dt_h/1000
+  E_CT_fan_kWh = sum(W_CT_fan_W)*dt_h/1000
+  E_cw_pump_kWh = sum(W_cw_pump_W)*dt_h/1000
+  E_sw_feed_pump_kWh = sum(W_sw_feed_pump_W)*dt_h/1000
+  E_aux_total_kWh = E_solar_pump_kWh
+                  + E_CT_fan_kWh
+                  + E_cw_pump_kWh
+                  + E_sw_feed_pump_kWh
+  E_available_for_RO_kWh = sum(W_available_for_RO_W)*dt_h/1000
+
+Su:
+  RO_product_water_m3 = sum(Qp_total_m3h(roOk))*dt_h
+  CT_makeup_water_m3 = sum(CT_makeup_m3h)*dt_h
+  Net_product_water_m3 = RO_product_water_m3 - CT_makeup_water_m3
+
+Preheater:
+  Preheater_ON_hours = hours with preheater_on and Q_preheater_W > 0
+  Preheater_commanded_on_hours = hours with preheater_on
+  Preheater_heat_kWh = sum(Q_preheater_W)*dt_h/1000
+
+Solar/storage:
+  Solar_useful_heat_kWh
+  Solar_excess_heat_kWh
+  Solar_return_sink_heat_kWh
+  Storage_charge_heat_kWh
+  Solar_curtailed_heat_kWh
+  Storage_final_SOC
+  Storage_final_T_C
+
+Status counts:
+  RO_DOMAIN_FAIL hours
+  RO_INFEASIBLE hours
+  POWER_DEFICIT hours
+  CT target-not-met hours
+  OK_CT_LIMITED hours
+  Coupling_not_converged_hours
+
+Ek runtime/diagnostic summary:
+
+  localAttachRunTiming, t_* kolonlarini ve solar/RO ANN diagnostic sayilarini
+  Summary tablosuna ekler.
+
+  Eklenen toplam sayaclar:
+    solar_solver_calls_total
+    ORC_dispatch_calls_total
+    ORC_candidate_evaluations_total
+    RO_ANN_calls_total
+    CT_solver_calls_total
+    preheater_rating_calls_total
+
+
+25. SISTEM STATUS ANLAMLARI
+---------------------------
+
+OK:
+  ORC feasible, RO feasible, train powered, CT hedef/ok.
+
+OK_CT_LIMITED:
+  ORC ve RO calisiyor fakat CT hedef sicakligi tam yakalayamadi. Sistem
+  calismasi degraded operating condition olarak kabul edilir.
+
+SYSTEM_OFF_SOLAR_OFF:
+  Solar input useful heat yok veya solar guard kapatti. ORC/RO skipped.
+
+ORC_OFF:
+  Solar var gibi gorunse bile ORC feasible/power-positive dispatch bulamadi.
+
+RO_DOMAIN_FAIL:
+  RO ANN inputlari hard training/deployment domain disinda.
+
+RO_INFEASIBLE:
+  ANN domain icinde ama feasibility classifier/guard sonucunda infeasible.
+
+POWER_DEFICIT:
+  En az bir train icin ANN feasible olabilir; fakat ORC netten solar pump,
+  CT fan, CW circulation pump ve seawater feed pump dusulduktan sonra kalan
+  elektrik butcesi hicbir train'i beslemiyor.
+
+NO_RO_TRAIN_INSTALLED:
+  cfg.ro.N_train_total < 1.
+
+CT_TARGET_NOT_MET:
+  Eski sequential dispatcher'da sistem status olarak kullanilir. Kapali
+  cevrim aktif yolda bunun yerine cogunlukla OK_CT_LIMITED kullanilir.
+
+
+26. RAPOR VE FIGURLER
+---------------------
+
+write_simulation_report_v1.m:
+
+  Run input cfg struct'ini, summary row'u, status count'lari, runtime profile'i,
+  key preheater/CT/ORC design sonuclarini ve cikti path'lerini TXT rapora yazar.
+
+Output dosyalari:
+
+  single_config_v1_hourly.csv
+  single_config_v1_summary.csv
+  single_config_v1_summary.mat
+  single_config_v1_report.txt
+  generated_figures/figures_YYYYMMDD_HHMMSS/*.png
+  generated_figures/figures_YYYYMMDD_HHMMSS/*.fig
+
+Figure generator:
+
+  System_Driver/Figures/generate_all_figures_v1.m
+
+Aktif figur fonksiyonlari:
+
+  fig_power_balance_v1.m
+  fig_water_balance_v1.m
+  fig_temperatures_v1.m
+  fig_status_counts_v1.m
+  fig_solar_evaporator_v1.m
+  fig_heat_exchanger_effectiveness_v1.m
+
+
+27. PROPERTY GRID VE COOLPROP BAGIMLILIGI
+-----------------------------------------
+
+Fluid_grid/THERMODB_V5_TEKNIK_ACIKLAMA.txt:
+
+  thermoDB_v5 semasini anlatir. ORC R1233zd(E) ve Water icin CoolProp ile
+  onceden uretilmis property tablolari runtime interpolasyonla kullanilabilir.
+
+thermoDB ana alanlari:
+
+  schema
+  fluid
+  meta
+  ranges
+  sat
+  Ps
+  Ph
+  PT
+  iso
+
+Desteklenen CoolProp-like state pairs:
+
+  P,Q
+  P,S
+  P,H
+  P,T
+
+Iki-faz bolgede cp/mu/k gibi karisim ozelliklerinde dikkat gerekir; ORC
+korelasyonlari cogunlukla sat tablosundaki faz ozelliklerini kullanmalidir.
+
+Humid air:
+
+  CoolingTower_v1_phase4_weather_hours_fast/Weather/HUMID_AIR_DB_V1_TEKNIK_ACIKLAMA.txt
+
+  humidAirDB_v1 ileride CT psikrometriyi dosya tabanli yapmak icin hazirdir.
+  Aktif CT default'u su an correlation backend'dir, annual loop'ta HAPropsSI
+  cagirmamaya calisir.
+
+
+28. RO TRUTH MODEL VE ANN EGITIM ARKA PLANI
+-------------------------------------------
+
+Aktif yillik sistem sadece frozen ANN wrapper'i cagirir. Ancak ANN'in
+uretildigi arka plan other_files altindadir.
+
+Temel truth-model kaynaklari:
+
+  Mokhtari et al. 2016
+  Jaafari & Rahimi 2021
+  Lu, Liao & Hu 2012
+  Du et al. 2014
+  DuPont FilmTec Technical Manual
+
+Ayrintili RO dosyalari:
+
+  ro_membrane_SW30XLE400.m
+  ro_properties_du2014.m
+  ro_osmotic_pressure_du2014.m
+  ro_tcf_du2014.m
+  ro_hydraulics_du2014.m
+  ro_local_transport_du2014.m
+  ro_pv_du2014.m
+  ro_system_two_stage.m
+  ro_system_two_stage_px_du2014.m
+  ro_system_two_stage_px_du2014_fast.m
+  ro_truth_model_two_stage.m
+  ro_optimize_train_point*.m
+  ro_generate_doe*.m
+  run_RO_ANN_train_v1_9_1.m
+
+ANN training mantigi:
+
+  Inputs:
+    Qf_train_m3h, T_RO_in_C, Cf_kg_m3, R_target
+
+  Classifier:
+    DatasetValid feasibility.
+
+  Regressors:
+    W_RO_train_kW
+    P1_opt_gauge_MPa
+    P2_opt_gauge_MPa
+
+  Hybrid Cp:
+    active-boundary classifier + margin regressor.
+
+  Physics-derived:
+    Qp and SEC.
+
+Onemli:
+
+  Yillik sistemde ANN yeniden egitilmez.
+  ANN mimarisi/esikleri guncellenirse bu dosyada domain, output ve validasyon
+  notlari da guncellenmelidir.
+
+
+29. PCM / TRNSYS DURUMU
+-----------------------
+
+PCM-TRNSYS_Matlab_Coupling/ aktif V1 yillik zincirde kullanilmaz.
+
+Mevcut README_TR.txt Type155 test akisini anlatir:
+
+  TRNSYS Type155 MATLAB'i her zaman adiminda cagirir.
+  MATLAB outputs dizisiyle Type840 inlet sicaklik/debi degerleri verir.
+  Test2 senaryosunda DP1/DP2 debi ve sicaklik profilleri 24 saatlik tekrarli
+  sekilde uretilir.
+
+Gelecek entegrasyon fikri:
+
+  Optimizasyon asamasinda dis MATLAB dongusu her aday icin deck parametreleri
+  yazabilir, TRNSYS'i bir kez kosabilir ve yillik PCM sonucunu okuyabilir.
+
+Aktif V1 depolama bunun yerine storage_water_tank_v1.m ile temsil edilir.
+
+
+30. ESKI / YARDIMCI DOSYALAR
+----------------------------
+
+Solar_Field/eski calisma/
+  Eski monolitik PTC-HX-ORC-exergy calismalari. Aktif V1 system path'te
+  dogrudan kullanilmamalidir.
+
+Solar_Field/solar_field_manual_thermal_analysis.m
+  Manuel solar thermal analiz/plot yardimcisi. Aktif coupled annual run
+  zinciri degildir.
+
+System_Driver/system_hourly_dispatch_v1.m
+  Eski sequential dispatcher. ORC annual onceden hesaplanip sonra PH/RO/CT
+  sirali baglanirdi. Aktif kapali cevrim solver'da solar/ORC/CT loop'lari
+  saat icinde iteratif kapatilir.
+
+RO_MATLAB_Model_v1_8_0_FINAL_DATASET/other_files/
+  RO truth-model, dataset, DOE, training, verification, figures ve testler.
+  Aktif sistemde sadece frozen ANN wrapper cagrilir.
+
+
+31. GELISTIRMEDE DIKKAT EDILECEK KRITIK KURALLAR
+------------------------------------------------
+
+1. ORC Stage-1 geometry frozen kalmali; annual/off-design rating geometriyi
+   yeniden boyutlandirmamali.
+
+2. RO ANN inputlari clamp edilmemeli. Domain disi saatler RO_DOMAIN_FAIL
+   olarak kalmali.
+
+3. W_RO_train_kW tekrar pompalarla double-count edilmemeli.
+   Bu deger RO train icindeki RO pump/booster/PX elektrik tuketimini temsil
+   eder. Sistem seviyesinde eklenen CW circulation ve seawater feed pump
+   yardimci tuketimleri ayridir.
+
+4. Solar pump power ORC netten dusulmeden RO dispatch yapilmamali.
+
+5. CT fan, CW circulation pump ve seawater feed pump power RO available
+   power'dan dusulmeli.
+
+6. CT makeup water net product water hesabindan cikarilmali.
+
+7. Syltherm800 default hot stream'dir. Water adapter yalnizca karsilastirma
+   veya debug icin kullanilmali.
+
+8. Preheater fixed geometry yillik runtime'da yeniden design edilmemeli.
+
+9. cfg.preheater.enforce_cond_out_above_feed aktif edilirse ORC dispatch
+   feasibility alani daralabilir; ORC_OFF nedenlerinde PREHEATER_COND_OUT_GUARD
+   gorulmesi beklenir.
+
+10. RO_DOMAIN_FAIL, RO_INFEASIBLE veya POWER_DEFICIT saatlerinde kabul
+    edilmeyen adaylarin preheater/CT ciktilari sistem durumuna tasinmamali.
+    RO off ise preheater off ve N_train_running=0 kalmalidir.
+
+11. RO dispatch candidate akisi preheater'dan sonra once RO ANN/domain ve
+    guc lower-bound kontrolu yapmalidir. Domain disi veya kesin guc yetmeyen
+    adaylarda CT solver cagrilmamalidir.
+
+12. timeStep_min < 60 ise input interpolation aktif olur. Toplam enerji/su
+    integralleri dt_h ile yapildigi icin summary tutarlidir.
+
+13. Eski klasorlerdeki dosyalar path onceligini bozmamali. system_paths_v1
+    aktif klasorleri -begin ile ekler.
+
+14. Bu teknik dokuman, model arayuzu veya hesap mantigi degistikce ayni
+    commit/degisiklik setinde guncellenmelidir.
+
+
+32. HIZLI DEBUG REHBERI
+-----------------------
+
+Solar kapali:
+  DNI_Whm2, solar_status, solar_flow_status, Q_solar_useful_W kontrol et.
+
+ORC kapali:
+  orc_status, orc_off_reason, orc_dispatch_best_status, candidate counts,
+  evaporator/condenser A_ratio ve pinch kolonlarini kontrol et.
+
+RO domain fail:
+  T_RO_in_C, Cf_kg_m3, cfg.ro.Qf_train_m3h, cfg.ro.R_target degerlerini
+  ANN domain ile karsilastir.
+  RO_DOMAIN_FAIL saatlerinde N_train_running=0, Q_preheater_W=0 ve
+  preheater_on=false beklenir. Aksi halde kabul edilmeyen aday durumu
+  sisteme sizmis demektir.
+
+Power deficit:
+  W_ORC_net_W, W_solar_pump_W, W_CT_fan_W, W_cw_pump_W,
+  W_sw_feed_pump_W, W_available_for_RO_W, RO_W_train_kW ve aday nTrain
+  sirasini kontrol et.
+
+CT limited:
+  T_cw_after_preheater_C, T_CT_out_C, ct_status, fan_ratio ve CTDesign
+  Q_rated_W degerlerini kontrol et.
+
+Preheater heat sifir:
+  DeltaT_preheater_available_K, preheater_status, T_sw_raw_C, T_cw_cond_out_C
+  ve target sicaklik clip'lerini kontrol et. Sicak yaz deniz suyu kosullarinda
+  preheater'in isi geri kazanamamasi fiziksel olarak mumkun olabilir.
+
+Coupling converge degil:
+  N_coupling_iter, solar_loop_residual_K, cw_loop_residual_K, relax,
+  CT target, solar return sink ve ORC dispatch warm-start davranisina bak.
+
+
+33. BAKIM PROTOKOLU
+-------------------
+
+Bu dosya proje icindeki canli teknik hafizadir. Asagidaki degisikliklerden
+sonra guncellenmelidir:
+
+  - cfg alan adi, default degeri veya birim degisirse
+  - yeni hourly/summary kolonu eklenirse
+  - solar, ORC, preheater, CT, RO veya storage arayuzu degisirse
+  - karar algoritmasi degisirse
+  - ANN model dosyasi/domain/threshold/output degisirse
+  - aktif run path degisirse
+  - PCM/TRNSYS entegrasyonu aktif zincire girerse
+  - property backend davranisi degisirse
+
+Pratik kural:
+
+  Kod degisikligi "baska yazilimci bunu bilmeden hatali kullanir" dedirtiyorsa
+  bu dosyaya da not dusulmelidir.

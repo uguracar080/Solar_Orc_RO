@@ -41,6 +41,12 @@ W_solar_pump_W = zeros(nHours,1);
 dP_solar_field_Pa = zeros(nHours,1);
 dP_orc_evap_hot_Pa = zeros(nHours,1);
 dP_solar_loop_Pa = zeros(nHours,1);
+dP_cw_condenser_Pa = zeros(nHours,1);
+dP_cw_preheater_hot_Pa = zeros(nHours,1);
+dP_cw_loop_Pa = zeros(nHours,1);
+W_cw_pump_W = zeros(nHours,1);
+dP_sw_preheater_cold_Pa = zeros(nHours,1);
+W_sw_feed_pump_W = zeros(nHours,1);
 T_solar_loop_in_C = nan(nHours,1);
 T_solar_loop_out_C = nan(nHours,1);
 T_orc_hot_return_raw_C = nan(nHours,1);
@@ -59,6 +65,9 @@ preheater_on = false(nHours,1);
 Q_preheater_W = nan(nHours,1);
 T_RO_in_C = nan(nHours,1);
 T_cw_after_preheater_C = nan(nHours,1);
+effectiveness_evaporator = nan(nHours,1);
+effectiveness_condenser = nan(nHours,1);
+effectiveness_preheater = nan(nHours,1);
 T_CT_out_C = nan(nHours,1);
 W_CT_fan_W = zeros(nHours,1);
 Q_CT_rejected_W = zeros(nHours,1);
@@ -117,8 +126,16 @@ orc_dispatch_best_cond_pinch_K = nan(nHours,1);
 t_solar_select_s = zeros(nHours,1);
 t_orc_dispatch_s = zeros(nHours,1);
 t_ro_heat_rejection_dispatch_s = zeros(nHours,1);
+t_ct_dispatch_s = zeros(nHours,1);
+t_ro_dispatch_s = zeros(nHours,1);
 t_storage_s = zeros(nHours,1);
 t_hour_s = zeros(nHours,1);
+solar_solver_calls_total = zeros(nHours,1);
+ORC_dispatch_calls_total = zeros(nHours,1);
+ORC_candidate_evaluations_total = zeros(nHours,1);
+RO_ANN_calls_total = zeros(nHours,1);
+CT_solver_calls_total = zeros(nHours,1);
+preheater_rating_calls_total = zeros(nHours,1);
 
 TsolarGuess_K = cfg.solar.T_HTF_in_K;
 TcwGuess_C = cfg.orc.cw_target_in_C;
@@ -126,6 +143,8 @@ warmStartOp = [];
 PHWasOn = false;
 StorageState = [];
 SolarSearchState = localBlankSolarSearchState();
+PreviousNtrain = NaN;
+PreviousRoTrainPowerW = NaN;
 
 hWait = localOpenWaitbar(cfg,'Coupled hourly solver');
 for it = 1:nHours
@@ -141,6 +160,8 @@ for it = 1:nHours
 
     State = localBlankState(TsolarGuess_K,TcwGuess_C,PHWasOn);
     State.SolarSearchState = SolarSearchState;
+    State.previous_N_train_running = PreviousNtrain;
+    State.previous_RO_train_power_W = PreviousRoTrainPowerW;
     for iter = 1:solver.max_iter
         State.iter = iter;
         State = localSolveOneCouplingIteration(State,cfg,WeatherData,SeawaterData,it, ...
@@ -163,6 +184,12 @@ for it = 1:nHours
     if State.ORC_feasible
         warmStartOp = localStepToOperatingInput(State.orcStep);
     end
+    if State.RO_feasible && State.N_train_running > 0
+        PreviousNtrain = State.N_train_running;
+        PreviousRoTrainPowerW = State.W_RO_total_W/max(State.N_train_running,1);
+    else
+        PreviousNtrain = State.N_train_running;
+    end
     SolarSearchState = State.SolarSearchState;
 
     TsolarGuess_K = localNextGuess(State.TsolarNext_K,cfg.solar.T_HTF_in_K);
@@ -176,6 +203,12 @@ for it = 1:nHours
     dP_solar_field_Pa(it) = State.dP_solar_field_Pa;
     dP_orc_evap_hot_Pa(it) = State.dP_orc_evap_hot_Pa;
     dP_solar_loop_Pa(it) = State.dP_solar_loop_Pa;
+    dP_cw_condenser_Pa(it) = State.dP_cw_condenser_Pa;
+    dP_cw_preheater_hot_Pa(it) = State.dP_cw_preheater_hot_Pa;
+    dP_cw_loop_Pa(it) = State.dP_cw_loop_Pa;
+    W_cw_pump_W(it) = State.W_cw_pump_W;
+    dP_sw_preheater_cold_Pa(it) = State.dP_sw_preheater_cold_Pa;
+    W_sw_feed_pump_W(it) = State.W_sw_feed_pump_W;
     Q_solar_return_sink_W(it) = State.Q_solar_return_sink_W;
     Q_solar_excess_W(it) = max(max(0,Q_solar_useful_W(it) - State.Q_ORC_evap_W), ...
         Q_solar_return_sink_W(it));
@@ -196,6 +229,8 @@ for it = 1:nHours
     Q_ORC_cond_W(it) = State.Q_ORC_cond_W;
     P_ORC_evap_Pa(it) = State.P_ORC_evap_Pa;
     P_ORC_cond_Pa(it) = State.P_ORC_cond_Pa;
+    effectiveness_evaporator(it) = State.effectiveness_evaporator;
+    effectiveness_condenser(it) = State.effectiveness_condenser;
     T_cw_loop_in_C(it) = State.TcwIn_C;
     T_cw_cond_out_C(it) = State.TcwCondOut_C;
     T_cw_cond_out_guard_C(it) = State.TcwCondOutGuard_C;
@@ -206,6 +241,7 @@ for it = 1:nHours
     Q_preheater_W(it) = State.PHOut.Q_recovered_W;
     T_RO_in_C(it) = State.PHOut.T_RO_in_C;
     T_cw_after_preheater_C(it) = State.PHOut.T_cw_out_C;
+    effectiveness_preheater(it) = localGet(State.PHOut,'effectiveness',NaN);
     T_CT_out_C(it) = State.TcwNext_C;
     W_CT_fan_W(it) = State.CTOut.W_fan_W;
     Q_CT_rejected_W(it) = State.CTOut.Q_rejected_W;
@@ -264,7 +300,15 @@ for it = 1:nHours
     t_solar_select_s(it) = State.timing_solar_select_s;
     t_orc_dispatch_s(it) = State.timing_orc_dispatch_s;
     t_ro_heat_rejection_dispatch_s(it) = State.timing_ro_heat_rejection_dispatch_s;
+    t_ct_dispatch_s(it) = State.timing_ct_dispatch_s;
+    t_ro_dispatch_s(it) = State.timing_ro_dispatch_s;
     t_hour_s(it) = toc(hourTimer);
+    solar_solver_calls_total(it) = State.solar_solver_calls_total;
+    ORC_dispatch_calls_total(it) = State.ORC_dispatch_calls_total;
+    ORC_candidate_evaluations_total(it) = State.ORC_candidate_evaluations_total;
+    RO_ANN_calls_total(it) = State.RO_ANN_calls_total;
+    CT_solver_calls_total(it) = State.CT_solver_calls_total;
+    preheater_rating_calls_total(it) = State.preheater_rating_calls_total;
 end
 localCloseWaitbar(hWait);
 
@@ -272,8 +316,11 @@ Hourly = table(hour,source_hour,DNI_Whm2,T_amb_C,T_wb_C,T_sw_raw_C,Cf_kg_m3, ...
     Q_solar_useful_W,Q_solar_excess_W,Q_solar_return_sink_W,Q_storage_charge_W,Q_solar_curtailed_W, ...
     storage_SOC,storage_T_C,storage_E_stored_kWh,solar_flow_factor,solar_V_Lmin_1module, ...
     W_solar_pump_W,dP_solar_field_Pa,dP_orc_evap_hot_Pa,dP_solar_loop_Pa, ...
+    dP_cw_condenser_Pa,dP_cw_preheater_hot_Pa,dP_cw_loop_Pa,W_cw_pump_W, ...
+    dP_sw_preheater_cold_Pa,W_sw_feed_pump_W, ...
     T_solar_loop_in_C,T_solar_loop_out_C,T_orc_hot_return_raw_C,T_orc_hot_return_C, ...
     W_ORC_net_W,Q_ORC_evap_W,Q_ORC_cond_W,P_ORC_evap_Pa,P_ORC_cond_Pa, ...
+    effectiveness_evaporator,effectiveness_condenser,effectiveness_preheater, ...
     T_cw_loop_in_C,T_cw_cond_out_C,T_cw_cond_out_guard_C,T_cw_cond_out_guard_margin_K, ...
     DeltaT_preheater_available_K,preheater_on,Q_preheater_W,T_RO_in_C,T_cw_after_preheater_C, ...
     T_CT_out_C,W_CT_fan_W,Q_CT_rejected_W,CT_makeup_m3h,CT_mdot_makeup_kg_s, ...
@@ -292,7 +339,10 @@ Hourly = table(hour,source_hour,DNI_Whm2,T_amb_C,T_wb_C,T_sw_raw_C,Cf_kg_m3, ...
     orc_off_reason,orc_dispatch_n_candidates_available,orc_dispatch_n_candidates_evaluated, ...
     orc_dispatch_best_status,orc_dispatch_best_W_net_W,orc_dispatch_best_evap_A_ratio, ...
     orc_dispatch_best_cond_A_ratio,orc_dispatch_best_evap_pinch_K,orc_dispatch_best_cond_pinch_K, ...
-    t_solar_select_s,t_orc_dispatch_s,t_ro_heat_rejection_dispatch_s,t_storage_s,t_hour_s);
+    t_solar_select_s,t_orc_dispatch_s,t_ro_heat_rejection_dispatch_s,t_ct_dispatch_s, ...
+    t_ro_dispatch_s,t_storage_s,t_hour_s, ...
+    solar_solver_calls_total,ORC_dispatch_calls_total,ORC_candidate_evaluations_total, ...
+    RO_ANN_calls_total,CT_solver_calls_total,preheater_rating_calls_total);
 
 orcAnnual = localBuildOrcAnnual(orcConfig,orcStep,cfg.sim.dt_s);
 end
@@ -310,7 +360,8 @@ tSolar = tic;
         localSelectSolarOperatingPoint(SolarInput,cfg.solar,State.SolarSearchState);
 State.timing_solar_select_s = State.timing_solar_select_s + toc(tSolar);
 State.solar_flow_search_status = SearchDiag.status;
-State.solar_flow_candidates_evaluated = SearchDiag.candidates_evaluated;
+State.solar_flow_candidates_evaluated = State.solar_flow_candidates_evaluated + SearchDiag.candidates_evaluated;
+State.solar_solver_calls_total = State.solar_solver_calls_total + SearchDiag.candidates_evaluated;
 State.solar_flow_full_search_used = SearchDiag.full_search_used;
 State.solar_solver_warm_start_used = SearchDiag.solver_warm_start_used;
 
@@ -337,6 +388,10 @@ else
     State.orcStep = orc_offdesign_rating(orcDesign,hotStream,coldStream,op,orcConfigStep);
 end
 State.timing_orc_dispatch_s = State.timing_orc_dispatch_s + toc(tOrc);
+State.ORC_dispatch_calls_total = State.ORC_dispatch_calls_total + 1;
+OrcIterDiag = localOrcDispatchDiagnostics(State.orcStep,false,localGet(State.orcStep,'orc_status',''));
+State.ORC_candidate_evaluations_total = State.ORC_candidate_evaluations_total + ...
+    OrcIterDiag.n_candidates_evaluated;
 
 th = State.orcStep.orc_thermo;
 er = State.orcStep.orc_evaporator_rate;
@@ -349,16 +404,26 @@ State.P_ORC_cond_Pa = th.P_orccond;
 State.TsolarNextRaw_K = er.T_orchtf_out;
 State.TsolarNext_K = er.T_orchtf_out;
 State.TcwCondOut_C = cr.T_orccw_out - 273.15;
+State.dP_cw_condenser_Pa = max(0,localGet(cr,'dp_orccw',0));
+[State.effectiveness_evaporator,State.effectiveness_condenser] = localOrcHxEffectiveness(State.orcStep);
 State = localApplySolarPump(State,cfg,orcConfig,hotStream,er);
 State = localApplySolarReturnSink(State,cfg,orcConfig,hotStream);
 State.ORC_feasible = State.orcStep.orc_feasible && th.W_orcnet > 0;
 State.orc_status = localGet(State.orcStep,'orc_status','');
 
 if ~State.ORC_feasible
+    State.effectiveness_evaporator = NaN;
+    State.effectiveness_condenser = NaN;
     State.PHOut = localBlankPHOut(State.TcwCondOut_C,SeawaterData.SeaWater_Temperature_C(it));
     State.TcwNext_C = cfg.orc.cw_target_in_C;
     State.CTOut = localBlankCTOut(State.TcwNext_C);
     State.W_available_for_RO_W = 0;
+    State.dP_cw_condenser_Pa = 0;
+    State.dP_cw_preheater_hot_Pa = 0;
+    State.dP_cw_loop_Pa = 0;
+    State.W_cw_pump_W = 0;
+    State.dP_sw_preheater_cold_Pa = 0;
+    State.W_sw_feed_pump_W = 0;
     State.N_train_running = 0;
     State.W_RO_total_W = 0;
     State.Qp_total_m3h = 0;
@@ -374,12 +439,23 @@ end
 tDispatch = tic;
 Dispatch = localDispatchRoTrains(cfg,WeatherData,SeawaterData,it, ...
     State.TcwCondOut_C,State.W_ORC_net_W - State.W_solar_pump_W, ...
-    State.Q_ORC_cond_W,PHDesign,CTDesign,CTConfig,State.PHWasOn);
+    State.Q_ORC_cond_W,PHDesign,CTDesign,CTConfig,State.PHWasOn, ...
+    State.dP_cw_condenser_Pa,State.previous_N_train_running);
 State.timing_ro_heat_rejection_dispatch_s = State.timing_ro_heat_rejection_dispatch_s + toc(tDispatch);
+State.timing_ct_dispatch_s = State.timing_ct_dispatch_s + Dispatch.timing_ct_s;
+State.timing_ro_dispatch_s = State.timing_ro_dispatch_s + Dispatch.timing_ro_s;
+State.RO_ANN_calls_total = State.RO_ANN_calls_total + Dispatch.RO_ANN_calls_total;
+State.CT_solver_calls_total = State.CT_solver_calls_total + Dispatch.CT_solver_calls_total;
+State.preheater_rating_calls_total = State.preheater_rating_calls_total + Dispatch.preheater_rating_calls_total;
 State.PHOut = Dispatch.PHOut;
 State.CTOut = Dispatch.CTOut;
 State.TcwNext_C = Dispatch.CTOut.T_w_out_C;
 State.W_available_for_RO_W = Dispatch.W_available_for_RO_W;
+State.dP_cw_preheater_hot_Pa = Dispatch.dP_cw_preheater_hot_Pa;
+State.dP_cw_loop_Pa = Dispatch.dP_cw_loop_Pa;
+State.W_cw_pump_W = Dispatch.W_cw_pump_W;
+State.dP_sw_preheater_cold_Pa = Dispatch.dP_sw_preheater_cold_Pa;
+State.W_sw_feed_pump_W = Dispatch.W_sw_feed_pump_W;
 State.N_train_running = Dispatch.N_train_running;
 State.W_RO_total_W = Dispatch.W_RO_total_W;
 State.Qp_total_m3h = Dispatch.Qp_total_m3h;
@@ -408,65 +484,145 @@ State.solar_residual_K = State.TsolarNext_K - State.TsolarIn_K;
 State.cw_residual_K = State.TcwNext_C - State.TcwIn_C;
 end
 
-function Dispatch = localDispatchRoTrains(cfg,WeatherData,SeawaterData,it,TcwHotC,WorcNetW,QcondW,PHDesign,CTDesign,CTConfig,PHWasOn)
+function Dispatch = localDispatchRoTrains(cfg,WeatherData,SeawaterData,it,TcwHotC,WorcNetW,QcondW,PHDesign,CTDesign,CTConfig,PHWasOn,orcCondDpCwPa,previousNtrain)
 Ntotal = max(0,round(cfg.ro.N_train_total));
 TswRawC = SeawaterData.SeaWater_Temperature_C(it);
 Dispatch = localBlankDispatch(TcwHotC,TswRawC,Ntotal);
 if Ntotal < 1
     Dispatch.system_status = "NO_RO_TRAIN_INSTALLED";
     Dispatch.ro_status = "NO_RO_TRAIN_INSTALLED";
-    [Dispatch.CTOut,~] = localRunCoolingTower(cfg,WeatherData,it,TcwHotC,CTDesign,CTConfig);
-    Dispatch.W_available_for_RO_W = WorcNetW - Dispatch.CTOut.W_fan_W;
+    tCT = tic;
+    [Dispatch.CTOut,~,ctSolved] = localRunCoolingTower(cfg,WeatherData,it,TcwHotC,CTDesign,CTConfig);
+    Dispatch.timing_ct_s = Dispatch.timing_ct_s + toc(tCT);
+    Dispatch.CT_solver_calls_total = Dispatch.CT_solver_calls_total + double(ctSolved);
+    Dispatch = localApplyRoAuxiliaryPumps(Dispatch,cfg,WorcNetW,orcCondDpCwPa);
     return
 end
 
 firstDomainFail = [];
 firstInfeasible = [];
 firstPowerDeficit = [];
-for nTrain = Ntotal:-1:1
+timing_ct_s = 0;
+timing_ro_s = 0;
+ro_ann_calls_total = 0;
+ct_solver_calls_total = 0;
+preheater_rating_calls_total = 0;
+startCandidate = localRoStartCandidate(Ntotal,previousNtrain);
+bestDispatch = [];
+
+for nTrain = startCandidate:Ntotal
     cand = localEvaluateRoTrainCandidate(cfg,WeatherData,SeawaterData,it, ...
-        TcwHotC,WorcNetW,QcondW,PHDesign,CTDesign,CTConfig,nTrain,PHWasOn);
-    if cand.RO_domain_fail
-        if isempty(firstDomainFail), firstDomainFail = cand; end
+        TcwHotC,WorcNetW,QcondW,PHDesign,CTDesign,CTConfig,nTrain,PHWasOn,orcCondDpCwPa);
+    timing_ct_s = timing_ct_s + cand.timing_ct_s;
+    timing_ro_s = timing_ro_s + cand.timing_ro_s;
+    ro_ann_calls_total = ro_ann_calls_total + cand.RO_ANN_calls_total;
+    ct_solver_calls_total = ct_solver_calls_total + cand.CT_solver_calls_total;
+    preheater_rating_calls_total = preheater_rating_calls_total + cand.preheater_rating_calls_total;
+    [firstDomainFail,firstInfeasible,firstPowerDeficit,rejected] = ...
+        localRecordRoCandidateRejection(cand,firstDomainFail,firstInfeasible,firstPowerDeficit);
+    if rejected
+        if ~isempty(bestDispatch)
+            Dispatch = localFinalizeOkRoDispatch(bestDispatch,timing_ct_s,timing_ro_s, ...
+                ro_ann_calls_total,ct_solver_calls_total,preheater_rating_calls_total);
+            return
+        end
+        break
+    end
+    bestDispatch = cand;
+end
+
+if ~isempty(bestDispatch)
+    Dispatch = localFinalizeOkRoDispatch(bestDispatch,timing_ct_s,timing_ro_s, ...
+        ro_ann_calls_total,ct_solver_calls_total,preheater_rating_calls_total);
+    return
+end
+
+for nTrain = (startCandidate-1):-1:1
+    cand = localEvaluateRoTrainCandidate(cfg,WeatherData,SeawaterData,it, ...
+        TcwHotC,WorcNetW,QcondW,PHDesign,CTDesign,CTConfig,nTrain,PHWasOn,orcCondDpCwPa);
+    timing_ct_s = timing_ct_s + cand.timing_ct_s;
+    timing_ro_s = timing_ro_s + cand.timing_ro_s;
+    ro_ann_calls_total = ro_ann_calls_total + cand.RO_ANN_calls_total;
+    ct_solver_calls_total = ct_solver_calls_total + cand.CT_solver_calls_total;
+    preheater_rating_calls_total = preheater_rating_calls_total + cand.preheater_rating_calls_total;
+    [firstDomainFail,firstInfeasible,firstPowerDeficit,rejected] = ...
+        localRecordRoCandidateRejection(cand,firstDomainFail,firstInfeasible,firstPowerDeficit);
+    if rejected
         continue
     end
-    if cand.RO_infeasible
-        if isempty(firstInfeasible), firstInfeasible = cand; end
-        continue
-    end
-    if cand.W_available_for_RO_W < cand.W_RO_total_W
-        if isempty(firstPowerDeficit), firstPowerDeficit = cand; end
-        continue
-    end
-    Dispatch = cand;
-    Dispatch.RO_feasible = true;
-    Dispatch.ro_status = "OK";
-    if localIsCoolingTowerOk(cand.CTOut)
-        Dispatch.system_status = "OK";
-    else
-        Dispatch.system_status = "OK_CT_LIMITED";
-    end
+    Dispatch = localFinalizeOkRoDispatch(cand,timing_ct_s,timing_ro_s, ...
+        ro_ann_calls_total,ct_solver_calls_total,preheater_rating_calls_total);
     return
 end
 
 if ~isempty(firstPowerDeficit)
-    Dispatch = localBlankDispatch(TcwHotC,TswRawC,Ntotal);
-    [Dispatch.CTOut,~] = localRunCoolingTower(cfg,WeatherData,it,TcwHotC,CTDesign,CTConfig);
-    Dispatch.W_available_for_RO_W = WorcNetW - Dispatch.CTOut.W_fan_W;
-    Dispatch.system_status = "POWER_DEFICIT";
-    Dispatch.ro_status = "POWER_LIMIT_NO_TRAIN";
+    Dispatch = localRoOffDispatch(cfg,WeatherData,it,TcwHotC,TswRawC,WorcNetW, ...
+        CTDesign,CTConfig,orcCondDpCwPa,timing_ct_s,timing_ro_s, ...
+        "POWER_DEFICIT","POWER_LIMIT_NO_TRAIN",firstPowerDeficit, ...
+        ro_ann_calls_total,ct_solver_calls_total,preheater_rating_calls_total);
 elseif ~isempty(firstDomainFail)
-    Dispatch = firstDomainFail;
-    Dispatch.system_status = "RO_DOMAIN_FAIL";
-    Dispatch.ro_status = "RO_DOMAIN_FAIL";
+    Dispatch = localRoOffDispatch(cfg,WeatherData,it,TcwHotC,TswRawC,WorcNetW, ...
+        CTDesign,CTConfig,orcCondDpCwPa,timing_ct_s,timing_ro_s, ...
+        "RO_DOMAIN_FAIL","RO_DOMAIN_FAIL",firstDomainFail, ...
+        ro_ann_calls_total,ct_solver_calls_total,preheater_rating_calls_total);
 elseif ~isempty(firstInfeasible)
-    Dispatch = firstInfeasible;
-    Dispatch.system_status = "RO_INFEASIBLE";
-    Dispatch.ro_status = "RO_INFEASIBLE";
+    Dispatch = localRoOffDispatch(cfg,WeatherData,it,TcwHotC,TswRawC,WorcNetW, ...
+        CTDesign,CTConfig,orcCondDpCwPa,timing_ct_s,timing_ro_s, ...
+        "RO_INFEASIBLE","RO_INFEASIBLE",firstInfeasible, ...
+        ro_ann_calls_total,ct_solver_calls_total,preheater_rating_calls_total);
+end
+if Dispatch.timing_ct_s == 0
+    Dispatch.timing_ct_s = timing_ct_s;
+end
+if Dispatch.timing_ro_s == 0
+    Dispatch.timing_ro_s = timing_ro_s;
 end
 end
 
-function cand = localEvaluateRoTrainCandidate(cfg,WeatherData,SeawaterData,it,TcwHotC,WorcNetW,QcondW,PHDesign,CTDesign,CTConfig,nTrain,PHWasOn)
+function startCandidate = localRoStartCandidate(Ntotal,previousNtrain)
+if isfinite(previousNtrain) && previousNtrain > 0
+    startCandidate = min(max(1,round(previousNtrain)),Ntotal);
+else
+    startCandidate = Ntotal;
+end
+end
+
+function [firstDomainFail,firstInfeasible,firstPowerDeficit,rejected] = ...
+    localRecordRoCandidateRejection(cand,firstDomainFail,firstInfeasible,firstPowerDeficit)
+rejected = true;
+if cand.RO_domain_fail
+    if isempty(firstDomainFail), firstDomainFail = cand; end
+    return
+end
+if cand.RO_infeasible
+    if isempty(firstInfeasible), firstInfeasible = cand; end
+    return
+end
+if cand.W_available_for_RO_W < cand.W_RO_total_W
+    if isempty(firstPowerDeficit), firstPowerDeficit = cand; end
+    return
+end
+rejected = false;
+end
+
+function Dispatch = localFinalizeOkRoDispatch(cand,timing_ct_s,timing_ro_s, ...
+    ro_ann_calls_total,ct_solver_calls_total,preheater_rating_calls_total)
+Dispatch = cand;
+Dispatch.timing_ct_s = timing_ct_s;
+Dispatch.timing_ro_s = timing_ro_s;
+Dispatch.RO_ANN_calls_total = ro_ann_calls_total;
+Dispatch.CT_solver_calls_total = ct_solver_calls_total;
+Dispatch.preheater_rating_calls_total = preheater_rating_calls_total;
+Dispatch.RO_feasible = true;
+Dispatch.ro_status = "OK";
+if localIsCoolingTowerOk(cand.CTOut)
+    Dispatch.system_status = "OK";
+else
+    Dispatch.system_status = "OK_CT_LIMITED";
+end
+end
+
+function cand = localEvaluateRoTrainCandidate(cfg,WeatherData,SeawaterData,it,TcwHotC,WorcNetW,QcondW,PHDesign,CTDesign,CTConfig,nTrain,PHWasOn,orcCondDpCwPa)
 TswRawC = SeawaterData.SeaWater_Temperature_C(it);
 Cf = localSeawaterConcentration(SeawaterData,it);
 cand = localBlankDispatch(TcwHotC,TswRawC,cfg.ro.N_train_total);
@@ -481,11 +637,15 @@ PHInput.mdot_cold_kg_s = mdotSw;
 PHInput.Q_available_W = QcondW;
 PHInput.T_cold_out_target_C = localPreheaterTargetC(cfg,TswRawC);
 cand.PHOut = localRunPreheaterControl(cfg,PHInput,PHDesign,PHWasOn);
-[cand.CTOut,~] = localRunCoolingTower(cfg,WeatherData,it,cand.PHOut.T_cw_out_C,CTDesign,CTConfig);
-cand.W_available_for_RO_W = WorcNetW - cand.CTOut.W_fan_W;
+if logical(localGet(cand.PHOut,'preheater_on',false))
+    cand.preheater_rating_calls_total = cand.preheater_rating_calls_total + 1;
+end
 
+tRO = tic;
 ROOut = ro_predict_ann_surrogate_v1_9_1(cfg.ro.model_file, ...
     cfg.ro.Qf_train_m3h,cand.PHOut.T_RO_in_C,Cf,cfg.ro.R_target);
+cand.timing_ro_s = cand.timing_ro_s + toc(tRO);
+cand.RO_ANN_calls_total = cand.RO_ANN_calls_total + 1;
 cand = localAttachRoDiagnostics(cand,ROOut);
 cand.RO_domain_fail = ~ROOut.InTrainingDomain(1);
 cand.RO_infeasible = ~ROOut.Feasible(1);
@@ -493,6 +653,101 @@ if ~cand.RO_domain_fail && ~cand.RO_infeasible
     cand.W_RO_total_W = nTrain * ROOut.W_RO_train_kW(1) * 1000;
     cand.Qp_total_m3h = nTrain * ROOut.Qp_train_m3h(1);
 end
+if cand.RO_domain_fail || cand.RO_infeasible
+    return
+end
+
+cand.W_available_for_RO_W = WorcNetW;
+if cand.W_RO_total_W > cand.W_available_for_RO_W
+    return
+end
+
+tCT = tic;
+[cand.CTOut,~,ctSolved] = localRunCoolingTower(cfg,WeatherData,it,cand.PHOut.T_cw_out_C,CTDesign,CTConfig);
+cand.timing_ct_s = cand.timing_ct_s + toc(tCT);
+cand.CT_solver_calls_total = cand.CT_solver_calls_total + double(ctSolved);
+cand = localApplyRoAuxiliaryPumps(cand,cfg,WorcNetW,orcCondDpCwPa);
+end
+
+function Dispatch = localRoOffDispatch(cfg,WeatherData,it,TcwHotC,TswRawC,WorcNetW, ...
+    CTDesign,CTConfig,orcCondDpCwPa,timing_ct_s,timing_ro_s,systemStatus,roStatus,diagSource, ...
+    ro_ann_calls_total,ct_solver_calls_total,preheater_rating_calls_total)
+Dispatch = localBlankDispatch(TcwHotC,TswRawC,max(0,round(cfg.ro.N_train_total)));
+Dispatch = localCopyRoDiagnostics(Dispatch,diagSource);
+Dispatch.RO_ANN_calls_total = ro_ann_calls_total;
+Dispatch.CT_solver_calls_total = ct_solver_calls_total;
+Dispatch.preheater_rating_calls_total = preheater_rating_calls_total;
+tCT = tic;
+[Dispatch.CTOut,~,ctSolved] = localRunCoolingTower(cfg,WeatherData,it,TcwHotC,CTDesign,CTConfig);
+Dispatch.timing_ct_s = timing_ct_s + toc(tCT);
+Dispatch.timing_ro_s = timing_ro_s;
+Dispatch.CT_solver_calls_total = Dispatch.CT_solver_calls_total + double(ctSolved);
+Dispatch = localApplyRoAuxiliaryPumps(Dispatch,cfg,WorcNetW,orcCondDpCwPa);
+Dispatch.system_status = systemStatus;
+Dispatch.ro_status = roStatus;
+end
+
+function dst = localCopyRoDiagnostics(dst,src)
+fields = {'RO_InTrainingDomain','RO_ClassifierFeasible','RO_BoundaryFeasibleOverride', ...
+    'RO_ANN_Feasible','RO_P_feasible','RO_Qp_train_m3h','RO_W_train_kW', ...
+    'RO_SEC_kWh_m3','RO_Cp_mg_L','RO_P1_opt_gauge_MPa','RO_P2_opt_gauge_MPa', ...
+    'RO_P_CpBoundary','RO_raw_Qp_train_m3h','RO_raw_W_train_kW', ...
+    'RO_raw_SEC_kWh_m3','RO_raw_Cp_mg_L','RO_raw_P1_opt_gauge_MPa', ...
+    'RO_raw_P2_opt_gauge_MPa'};
+for i = 1:numel(fields)
+    if isfield(src,fields{i})
+        dst.(fields{i}) = src.(fields{i});
+    end
+end
+end
+
+function Dispatch = localApplyRoAuxiliaryPumps(Dispatch,cfg,WorcNetW,orcCondDpCwPa)
+phOn = logical(localGet(Dispatch.PHOut,'preheater_on',false));
+Dispatch.dP_cw_condenser_Pa = max(0,orcCondDpCwPa);
+Dispatch.dP_cw_preheater_hot_Pa = 0;
+if phOn
+    Dispatch.dP_cw_preheater_hot_Pa = max(0,localGet(Dispatch.PHOut,'dp_hot_Pa',0));
+end
+Dispatch.dP_cw_loop_Pa = Dispatch.dP_cw_condenser_Pa + Dispatch.dP_cw_preheater_hot_Pa;
+cwPumpCfg = localGetPumpConfig(cfg,'cw_circulation');
+Dispatch.W_cw_pump_W = localHydraulicPumpPower( ...
+    localGetNested(cfg,'orc','mdot_cw_design_kg_s',0),Dispatch.dP_cw_loop_Pa, ...
+    localGetNested(cfg,'preheater','hot_rho_kgm3',997),cwPumpCfg);
+
+Dispatch.dP_sw_preheater_cold_Pa = 0;
+if phOn
+    Dispatch.dP_sw_preheater_cold_Pa = max(0,localGet(Dispatch.PHOut,'dp_cold_Pa',0));
+end
+swPumpCfg = localGetPumpConfig(cfg,'seawater_feed');
+Dispatch.W_sw_feed_pump_W = localHydraulicPumpPower( ...
+    max(0,localGet(Dispatch.PHOut,'mdot_sw_kg_s',0)),Dispatch.dP_sw_preheater_cold_Pa, ...
+    localGetNested(cfg,'ro','rho_seawater_kgm3',1025),swPumpCfg);
+
+Dispatch.W_available_for_RO_W = WorcNetW - localGet(Dispatch.CTOut,'W_fan_W',0) - ...
+    Dispatch.W_cw_pump_W - Dispatch.W_sw_feed_pump_W;
+end
+
+function pumpCfg = localGetPumpConfig(cfg,name)
+pumpCfg = struct('enabled',true,'eta_hydraulic',0.75,'eta_motor',0.95);
+if isfield(cfg,'pumps') && isstruct(cfg.pumps) && isfield(cfg.pumps,name) && ...
+        isstruct(cfg.pumps.(name))
+    P = cfg.pumps.(name);
+    pumpCfg.enabled = localGet(P,'enabled',pumpCfg.enabled);
+    pumpCfg.eta_hydraulic = localGet(P,'eta_hydraulic',pumpCfg.eta_hydraulic);
+    pumpCfg.eta_motor = localGet(P,'eta_motor',pumpCfg.eta_motor);
+end
+end
+
+function W = localHydraulicPumpPower(mdot,dP,rho,pumpCfg)
+W = 0;
+if ~isstruct(pumpCfg) || ~localGet(pumpCfg,'enabled',true)
+    return
+end
+if ~(isfinite(mdot) && isfinite(dP) && isfinite(rho)) || mdot <= 0 || dP <= 0 || rho <= 0
+    return
+end
+etaTotal = max(localGet(pumpCfg,'eta_hydraulic',0.75)*localGet(pumpCfg,'eta_motor',0.95),eps);
+W = mdot*dP/(rho*etaTotal);
 end
 
 function PHOut = localRunPreheaterControl(cfg,PHInput,PHDesign,PHWasOn)
@@ -632,10 +887,17 @@ if useAdaptive
     idx = localChooseSolarCandidate(Candidate,fc);
     needFull = localSolarCandidateNeedsFullFallback(Candidate,idx,factors,fc);
     if needFull
-        [CandidateFull,usedWarmStartFull] = localEvaluateSolarCandidates(SolarInput,SolarConfig,SearchState,Vref,fc,factors);
+        fullOnlyFactors = setdiff(factors(:),localFactors(:),'stable');
+        if isempty(fullOnlyFactors)
+            CandidateFull = Candidate;
+            usedWarmStartFull = false;
+        else
+            [CandidateFullOnly,usedWarmStartFull] = localEvaluateSolarCandidates(SolarInput,SolarConfig,SearchState,Vref,fc,fullOnlyFactors);
+            CandidateFull = [Candidate(:); CandidateFullOnly(:)];
+        end
         Candidate = CandidateFull;
         idx = localChooseSolarCandidate(Candidate,fc);
-        SearchDiag.candidates_evaluated = SearchDiag.candidates_evaluated + numel(factors);
+        SearchDiag.candidates_evaluated = SearchDiag.candidates_evaluated + numel(fullOnlyFactors);
         SearchDiag.solver_warm_start_used = SearchDiag.solver_warm_start_used || usedWarmStartFull;
         SearchDiag.full_search_used = true;
         SearchDiag.status = "ADAPTIVE_FALLBACK_FULL";
@@ -869,7 +1131,6 @@ State.SolarSearchState = localBlankSolarSearchState();
 State.solar_flow_factor = NaN;
 State.solar_flow_status = "SOLAR_OFF";
 State.solar_flow_search_status = "SOLAR_OFF_RESET";
-State.solar_flow_candidates_evaluated = 0;
 State.solar_flow_full_search_used = false;
 State.solar_solver_warm_start_used = false;
 State.solar_residual_K = 0;
@@ -1038,6 +1299,14 @@ State.Q_ORC_evap_W = 0;
 State.Q_ORC_cond_W = 0;
 State.Q_solar_return_sink_W = 0;
 State.W_solar_pump_W = 0;
+State.dP_cw_condenser_Pa = 0;
+State.dP_cw_preheater_hot_Pa = 0;
+State.dP_cw_loop_Pa = 0;
+State.W_cw_pump_W = 0;
+State.dP_sw_preheater_cold_Pa = 0;
+State.W_sw_feed_pump_W = 0;
+State.effectiveness_evaporator = NaN;
+State.effectiveness_condenser = NaN;
 State.dP_solar_field_Pa = 0;
 State.dP_orc_evap_hot_Pa = 0;
 State.dP_solar_loop_Pa = 0;
@@ -1067,6 +1336,16 @@ State.system_status = "UNINITIALIZED";
 State.timing_solar_select_s = 0;
 State.timing_orc_dispatch_s = 0;
 State.timing_ro_heat_rejection_dispatch_s = 0;
+State.timing_ct_dispatch_s = 0;
+State.timing_ro_dispatch_s = 0;
+State.solar_solver_calls_total = 0;
+State.ORC_dispatch_calls_total = 0;
+State.ORC_candidate_evaluations_total = 0;
+State.RO_ANN_calls_total = 0;
+State.CT_solver_calls_total = 0;
+State.preheater_rating_calls_total = 0;
+State.previous_N_train_running = NaN;
+State.previous_RO_train_power_W = NaN;
 State.SolarSearchState = localBlankSolarSearchState();
 State.SolarOut = struct();
 State.orcStep = struct();
@@ -1082,6 +1361,17 @@ Dispatch.W_RO_total_W = 0;
 Dispatch.Qp_total_m3h = 0;
 Dispatch.W_available_for_RO_W = 0;
 Dispatch = localResetRoDiagnostics(Dispatch);
+Dispatch.timing_ct_s = 0;
+Dispatch.timing_ro_s = 0;
+Dispatch.RO_ANN_calls_total = 0;
+Dispatch.CT_solver_calls_total = 0;
+Dispatch.preheater_rating_calls_total = 0;
+Dispatch.dP_cw_condenser_Pa = 0;
+Dispatch.dP_cw_preheater_hot_Pa = 0;
+Dispatch.dP_cw_loop_Pa = 0;
+Dispatch.W_cw_pump_W = 0;
+Dispatch.dP_sw_preheater_cold_Pa = 0;
+Dispatch.W_sw_feed_pump_W = 0;
 Dispatch.RO_feasible = false;
 Dispatch.RO_domain_fail = false;
 Dispatch.RO_infeasible = false;
@@ -1141,6 +1431,10 @@ PHOut.T_cw_out_C = TcwHotC;
 PHOut.T_hot_out_C = TcwHotC;
 PHOut.T_sw_out_C = TswRawC;
 PHOut.preheater_on = false;
+PHOut.effectiveness = NaN;
+PHOut.dp_hot_Pa = 0;
+PHOut.dp_cold_Pa = 0;
+PHOut.mdot_sw_kg_s = 0;
 PHOut.deltaT_available_K = TcwHotC - TswRawC;
 PHOut.deltaT_ON_K = NaN;
 PHOut.deltaT_OFF_K = NaN;
@@ -1148,10 +1442,11 @@ PHOut.feasible = true;
 PHOut.status = 'SKIPPED_RO_OFF';
 end
 
-function [CTOut,ctWasNeeded] = localRunCoolingTower(cfg,WeatherData,it,TcwInC,CTDesign,CTConfig)
+function [CTOut,ctWasNeeded,ctSolved] = localRunCoolingTower(cfg,WeatherData,it,TcwInC,CTDesign,CTConfig)
 CTOut = localBlankCTOut(TcwInC);
 targetC = cfg.ct.T_cw_target_C;
 ctWasNeeded = isfinite(TcwInC) && TcwInC > targetC + 1e-6;
+ctSolved = false;
 if ~ctWasNeeded
     CTOut.T_w_out_C = TcwInC;
     CTOut.status = 'NOT_NEEDED';
@@ -1164,12 +1459,15 @@ CTAmbient.T_db_C = WeatherData.T_amb_C(it);
 CTAmbient.T_wb_C = WeatherData.T_wb_C(it);
 CTAmbient.RH_pct = WeatherData.RH_pct(it);
 CTAmbient.P_atm_Pa = WeatherData.Patm_Pa(it);
+CTAir = ct_psychrometrics(CTAmbient,CTConfig);
 
 CTInput = struct();
 CTInput.T_w_in_C = TcwInC;
 CTInput.mdot_water = cfg.orc.mdot_cw_design_kg_s;
 CTInput.T_w_out_target_C = targetC;
+CTInput.air_in = CTAir;
 CTOut = ct_solve_fan_for_target(CTInput,CTAmbient,CTDesign,CTConfig);
+ctSolved = true;
 end
 
 function CTOut = localBlankCTOut(TcwInC)
@@ -1195,19 +1493,18 @@ D.best_cond_A_ratio = NaN;
 D.best_evap_pinch_K = NaN;
 D.best_cond_pinch_K = NaN;
 
-if ORCFeasible
-    D.off_reason = "ON";
-    return
-end
-
 statusText = string(orcStatus);
-if statusText == "skipped-solar-off"
+if ~ORCFeasible && statusText == "skipped-solar-off"
     D.off_reason = "SOLAR_OFF";
     return
 end
 
 if ~isstruct(orcStep) || ~isfield(orcStep,'orc_dispatch') || ~isstruct(orcStep.orc_dispatch)
-    D.off_reason = "NO_DISPATCH_LOG";
+    if ORCFeasible
+        D.off_reason = "ON";
+    else
+        D.off_reason = "NO_DISPATCH_LOG";
+    end
     return
 end
 
@@ -1215,7 +1512,11 @@ disp = orcStep.orc_dispatch;
 D.n_candidates_available = localGet(disp,'orc_nCandidatesAvailable',0);
 D.n_candidates_evaluated = localGet(disp,'orc_nCandidatesEvaluated',0);
 if ~isfield(disp,'orc_candidateLog') || isempty(disp.orc_candidateLog)
-    D.off_reason = "NO_CANDIDATE_LOG";
+    if ORCFeasible
+        D.off_reason = "ON";
+    else
+        D.off_reason = "NO_CANDIDATE_LOG";
+    end
     return
 end
 
@@ -1244,7 +1545,11 @@ D.best_cond_A_ratio = localGet(best,'cond_A_ratio',NaN);
 D.best_evap_pinch_K = localGet(best,'evap_pinch_K',NaN);
 D.best_cond_pinch_K = localGet(best,'cond_pinch_K',NaN);
 
-D.off_reason = localClassifyOrcOffReason(status,best);
+if ORCFeasible
+    D.off_reason = "ON";
+else
+    D.off_reason = localClassifyOrcOffReason(status,best);
+end
 end
 
 function reason = localClassifyOrcOffReason(status,best)
@@ -1467,6 +1772,37 @@ end
 function tf = localIsCoolingTowerOk(CTOut)
 status = string(localGet(CTOut,'status',''));
 tf = localGet(CTOut,'feasible',false) && any(strcmpi(status,["OK","TARGET_MET","NOT_NEEDED"]));
+end
+
+function [epsEvap,epsCond] = localOrcHxEffectiveness(orcStep)
+epsEvap = NaN;
+epsCond = NaN;
+if ~isstruct(orcStep) || ~isfield(orcStep,'orc_thermo')
+    return
+end
+
+th = orcStep.orc_thermo;
+if isfield(orcStep,'orc_evaporator_rate')
+    er = orcStep.orc_evaporator_rate;
+    epsEvap = localBoundedEffectiveness( ...
+        localGet(er,'T_orchtf_in',NaN) - localGet(er,'T_orchtf_out',NaN), ...
+        localGet(er,'T_orchtf_in',NaN) - localGet(th,'T_orcpump_out',NaN));
+end
+
+if isfield(orcStep,'orc_condenser_rate')
+    cr = orcStep.orc_condenser_rate;
+    epsCond = localBoundedEffectiveness( ...
+        localGet(cr,'T_orccw_out',NaN) - localGet(cr,'T_orccw_in',NaN), ...
+        localGet(th,'T_orcturb_out',NaN) - localGet(cr,'T_orccw_in',NaN));
+end
+end
+
+function epsHx = localBoundedEffectiveness(actualDeltaT,maxDeltaT)
+if isfinite(actualDeltaT) && isfinite(maxDeltaT) && maxDeltaT > 0 && actualDeltaT >= 0
+    epsHx = min(max(actualDeltaT/maxDeltaT,0),1);
+else
+    epsHx = NaN;
+end
 end
 
 function value = localGetCtWaterUse(CTOut,fieldName,defaultValue)

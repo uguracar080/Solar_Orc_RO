@@ -624,12 +624,13 @@ end
 % =========================================================================
 function flow = localWorkFluidFlowAtPH(config,orcFluid,mdot,P,h)
 % Build a flow-property struct from working-fluid P,H.
+props = orc_properties(config,'STATE','P',P,'H',h,orcFluid);
 flow = struct();
 flow.mdot = mdot;                                     % [kg/s]
-flow.rho = orc_properties(config,'D','P',P,'H',h,orcFluid); % [kg/m3]
-flow.mu = orc_properties(config,'V','P',P,'H',h,orcFluid);  % [Pa s]
-flow.k = orc_properties(config,'L','P',P,'H',h,orcFluid);   % [W/m/K]
-flow.cp = orc_properties(config,'C','P',P,'H',h,orcFluid);  % [J/kg/K]
+flow.rho = props.rho;                                 % [kg/m3]
+flow.mu = props.mu;                                   % [Pa s]
+flow.k = props.k;                                     % [W/m/K]
+flow.cp = props.cp;                                   % [J/kg/K]
 end
 
 % =========================================================================
@@ -637,15 +638,15 @@ end
 % =========================================================================
 function flow = localExternalFlowAtH(config,orcStream,mdot,h)
 % Build a flow-property struct from external-stream P,H.
-T = orc_stream_properties(config,orcStream,'T','P',orcStream.P_in,'H',h); % [K]
+props = orc_stream_properties(config,orcStream,'STATE','P',orcStream.P_in,'H',h);
 flow = struct();
 flow.mdot = mdot;                                     % [kg/s]
-flow.T = T;                                           % [K]
+flow.T = props.T;                                     % [K]
 flow.h = h;                                           % [J/kg]
-flow.rho = orc_stream_properties(config,orcStream,'D','T',T,'P',orcStream.P_in); % [kg/m3]
-flow.mu = orc_stream_properties(config,orcStream,'V','T',T,'P',orcStream.P_in);  % [Pa s]
-flow.k = orc_stream_properties(config,orcStream,'L','T',T,'P',orcStream.P_in);   % [W/m/K]
-flow.cp = orc_stream_properties(config,orcStream,'C','T',T,'P',orcStream.P_in);  % [J/kg/K]
+flow.rho = props.rho;                                 % [kg/m3]
+flow.mu = props.mu;                                   % [Pa s]
+flow.k = props.k;                                     % [W/m/K]
+flow.cp = props.cp;                                   % [J/kg/K]
 end
 
 % =========================================================================

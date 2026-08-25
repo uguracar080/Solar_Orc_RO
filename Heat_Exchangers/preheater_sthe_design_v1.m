@@ -68,7 +68,9 @@ end
 lmtd = localLmtd(dT1,dT2);
 
 best = [];
-for Npar = 1:PHConfig.N_parallel_max
+NparMin = max(1,round(PHConfig.N_parallel_min));
+NparMax = max(NparMin,round(PHConfig.N_parallel_max));
+for Npar = NparMin:NparMax
     bestThis = [];
     for Nt = PHConfig.Nt_list
         cand = localEvaluateCandidate(Npar,Nt,Qtotal,lmtd,ThIn,ThOut,TcIn,TcOutTarget, ...
@@ -192,6 +194,7 @@ cfg = localSetDefault(cfg,'dT_min_K',3.0);
 cfg = localSetDefault(cfg,'T_cold_out_design_C',25.0);
 cfg = localSetDefault(cfg,'T_cold_out_max_C',45.0);
 cfg = localSetDefault(cfg,'geometry_family','condenser');
+cfg = localSetDefault(cfg,'N_parallel_min',1);
 cfg = localSetDefault(cfg,'N_parallel_max',20);
 cfg = localSetDefault(cfg,'Nt_list',20:20:1200);
 if ~isfield(cfg,'orc_config') || isempty(cfg.orc_config)

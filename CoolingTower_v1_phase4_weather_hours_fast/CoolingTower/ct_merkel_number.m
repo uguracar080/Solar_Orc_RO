@@ -36,7 +36,11 @@ for k = 1:numel(required)
     end
 end
 
-CTAir = ct_psychrometrics(CTInput.ambient,CTConfig);
+if isfield(CTInput,'air_in') && isstruct(CTInput.air_in) && isfield(CTInput.air_in,'h_Jkgda')
+    CTAir = CTInput.air_in;
+else
+    CTAir = ct_psychrometrics(CTInput.ambient,CTConfig);
+end
 if numel(CTAir.h_Jkgda) ~= 1
     error('ct_merkel_number:ScalarOnly','Phase-1 Merkel solver expects a scalar CT operating point.');
 end
@@ -103,7 +107,8 @@ switch CTModeKey
             return
         end
 
-        Tw_out = fzero(residual,[T_lower T_upper]);
+        opts = optimset('TolX',CTNumerics.inverse_temperature_tolerance_C,'Display','off');
+        Tw_out = fzero(residual,[T_lower T_upper],opts);
         CTCalc = merkel_forward(Tw_out,Tw_in,CTAir.h_Jkgda,LoverG, ...
             CTInput.ambient.P_atm_Pa,cp,CTConfig);
         CTOutput = package_output(Tw_out,LoverG,CTAir,CTCalc);

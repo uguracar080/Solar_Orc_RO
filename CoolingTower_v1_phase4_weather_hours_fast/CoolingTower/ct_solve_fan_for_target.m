@@ -63,7 +63,8 @@ end
 residual = @(fr) fan_residual(fr,CTInput,CTAmbient,CTDesign,CTConfig,Ttarget);
 fr_low = CTConfig.numerics.min_fan_ratio_for_solve;
 fr_high = CTConfig.fan.fan_ratio_max;
-fan_ratio_star = fzero(residual,[fr_low fr_high]);
+opts = optimset('TolX',CTConfig.numerics.fan_ratio_tolerance,'Display','off');
+fan_ratio_star = fzero(residual,[fr_low fr_high],opts);
 fan_ratio_star = min(max(fan_ratio_star,CTConfig.fan.fan_ratio_min),CTConfig.fan.fan_ratio_max);
 
 CTInputStar = CTInput;

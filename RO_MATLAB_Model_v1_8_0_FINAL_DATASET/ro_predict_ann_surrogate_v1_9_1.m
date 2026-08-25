@@ -23,8 +23,7 @@ if nargin < 1 || strlength(string(ModelFile)) == 0
     ModelFile = 'RO_ANN_models_v1_9_1.mat';
 end
 
-S = load(ModelFile,'Models');
-Models = S.Models;
+Models = load_models_cached(ModelFile);
 
 Qf = double(Qf_train_m3h(:));
 T  = double(T_RO_in_C(:));
@@ -141,4 +140,17 @@ Boundary = struct();
 Boundary.Cp_tol_mgL = 1.0e-6;
 Boundary.P_min_gauge_MPa = 0.0;
 Boundary.P_max_gauge_MPa = 8.30;
+end
+
+function Models = load_models_cached(ModelFile)
+persistent cachedFile cachedModels
+modelPath = char(string(ModelFile));
+if isempty(cachedModels) || ~strcmp(cachedFile,modelPath)
+    S = load(modelPath,'Models');
+    Models = S.Models;
+    cachedFile = modelPath;
+    cachedModels = Models;
+else
+    Models = cachedModels;
+end
 end

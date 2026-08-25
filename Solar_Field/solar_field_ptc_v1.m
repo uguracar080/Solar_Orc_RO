@@ -45,7 +45,7 @@ try
     inPTC.Tin_K = Tin_K;
     inPTC.V_Lmin_1module = V_Lmin_1module;
 
-    opts = localFsolveOptions();
+    opts = localFsolveOptions(SolarConfig);
     field = SolarConfig.field;
     ptc = SolarConfig.ptc;
 
@@ -92,6 +92,12 @@ if ~isfield(cfg,'field') || isempty(cfg.field)
 end
 cfg.field = localSetDefault(cfg.field,'N_series',12);
 cfg.field = localSetDefault(cfg.field,'N_parallel',12);
+
+if ~isfield(cfg,'solver') || isempty(cfg.solver)
+    cfg.solver = struct();
+end
+cfg.solver = localSetDefault(cfg.solver,'FunctionTolerance',1e-6);
+cfg.solver = localSetDefault(cfg.solver,'StepTolerance',1e-6);
 
 if ~isfield(cfg,'ptc') || isempty(cfg.ptc)
     cfg.ptc = struct();
@@ -140,12 +146,15 @@ out.ptc_field = struct();
 out.solver_cache = struct();
 end
 
-function opts = localFsolveOptions()
+function opts = localFsolveOptions(SolarConfig)
+solverCfg = localGet(SolarConfig,'solver',struct());
+funTol = localGet(solverCfg,'FunctionTolerance',1e-6);
+stepTol = localGet(solverCfg,'StepTolerance',1e-6);
 if exist('optimoptions','file') == 2
     opts = optimoptions('fsolve','Display','none', ...
-        'FunctionTolerance',1e-10,'StepTolerance',1e-10);
+        'FunctionTolerance',funTol,'StepTolerance',stepTol);
 else
-    opts = optimset('Display','off','TolFun',1e-10,'TolX',1e-10);
+    opts = optimset('Display','off','TolFun',funTol,'TolX',stepTol);
 end
 end
 
@@ -244,7 +253,7 @@ Tc = x(2);
 Tout = x(3);
 
 Tfm = 0.5*(in.Tin + Tout);
-[rho,cp,k,mu] = localSyltherm800Props(Tfm);
+[rho,cp,k,mu] = syltherm800_properties_v2(Tfm);
 V_m3s = in.V_Lmin*1e-3/60;
 mdot = rho*V_m3s;
 Re = 4*mdot/(pi*ptc.Dri*mu);
@@ -278,7 +287,7 @@ Tc = x(2);
 Tout = x(3);
 
 Tfm = 0.5*(Tin + Tout);
-[rho,cp,k,mu] = localSyltherm800Props(Tfm);
+[rho,cp,k,mu] = syltherm800_properties_v2(Tfm);
 
 V_m3s = V_Lmin*1e-3/60;
 mdot = rho*V_m3s;
@@ -305,62 +314,6 @@ F = zeros(3,1);
 F(1) = QlossR2C - QlossC2A;
 F(2) = Qu - QuConv;
 F(3) = Qabs - Qu - QlossR2C;
-end
-
-function [rho,cp,k,mu] = localSyltherm800Props(TK)
-TC = TK - 273.15;
-data = [ ...
-    -40 1.506 990.61 0.1463 51.05
-    -30 1.523 981.08 0.1444 35.45
-    -20 1.540 971.68 0.1425 25.86
-    -10 1.557 962.37 0.1407 19.61
-      0 1.574 953.16 0.1388 15.33
-     10 1.591 944.04 0.1369 12.27
-     20 1.608 934.99 0.1350 10.03
-     30 1.625 926.00 0.1331  8.32
-     40 1.643 917.07 0.1312  7.00
-     50 1.660 908.18 0.1294  5.96
-     60 1.677 899.32 0.1275  5.12
-     70 1.694 890.49 0.1256  4.43
-     80 1.711 881.68 0.1237  3.86
-     90 1.728 872.86 0.1218  3.39
-    100 1.745 864.05 0.1200  2.99
-    110 1.762 855.21 0.1181  2.65
-    120 1.779 846.35 0.1162  2.36
-    130 1.796 837.46 0.1143  2.11
-    140 1.813 828.51 0.1124  1.89
-    150 1.830 819.51 0.1106  1.70
-    160 1.847 810.45 0.1087  1.54
-    170 1.864 801.31 0.1068  1.39
-    180 1.882 792.08 0.1049  1.26
-    190 1.899 782.76 0.1030  1.15
-    200 1.916 773.33 0.1012  1.05
-    210 1.933 763.78 0.0993  0.96
-    220 1.950 754.11 0.0974  0.88
-    230 1.967 744.30 0.0955  0.81
-    240 1.984 734.35 0.0936  0.74
-    250 2.001 724.24 0.0918  0.69
-    260 2.018 713.96 0.0899  0.63
-    270 2.035 703.51 0.0880  0.59
-    280 2.052 692.87 0.0861  0.54
-    290 2.069 682.03 0.0842  0.50
-    300 2.086 670.99 0.0824  0.47
-    310 2.104 659.73 0.0805  0.44
-    320 2.121 648.24 0.0786  0.41
-    330 2.138 636.52 0.0767  0.38
-    340 2.155 624.55 0.0748  0.36
-    350 2.172 612.33 0.0729  0.33
-    360 2.189 599.83 0.0711  0.31
-    370 2.206 587.07 0.0692  0.29
-    380 2.223 574.01 0.0673  0.28
-    390 2.240 560.66 0.0654  0.26
-    400 2.257 547.00 0.0635  0.25
-];
-T = data(:,1);
-cp = interp1(T,data(:,2),TC,'linear','extrap')*1000;
-rho = interp1(T,data(:,3),TC,'linear','extrap');
-k = interp1(T,data(:,4),TC,'linear','extrap');
-mu = interp1(T,data(:,5),TC,'linear','extrap')*1e-3;
 end
 
 function value = localGet(S,fieldName,defaultValue)

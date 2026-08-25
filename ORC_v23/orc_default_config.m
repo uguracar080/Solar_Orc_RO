@@ -7,6 +7,9 @@ function config = orc_default_config(config)
 if nargin < 1 || isempty(config)
     config = struct();
 end
+if isfield(config,'orc_config_finalized') && logical(config.orc_config_finalized)
+    return
+end
 
 % =========================================================================
 % PROPERTY MODEL

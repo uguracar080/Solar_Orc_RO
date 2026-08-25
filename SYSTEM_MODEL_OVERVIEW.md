@@ -1,3 +1,5 @@
+Güncel teknik açıklama için PROJE_TEKNIK_ACIKLAMA.txt dosyasına bakın
+
 # Integrated Solar-ORC-RO System Model Overview
 
 Last updated: 2026-08-17

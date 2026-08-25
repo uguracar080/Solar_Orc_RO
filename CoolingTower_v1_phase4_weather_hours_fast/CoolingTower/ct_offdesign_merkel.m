@@ -18,7 +18,13 @@ if ~isfield(CTInput,'T_w_in_C')
 end
 
 mdot_water = getfield_default(CTInput,'mdot_water',CTDesign.mdot_water_rated);
-CTAir = ct_psychrometrics(CTAmbient,CTConfig);
+if isfield(CTInput,'air_in') && isstruct(CTInput.air_in) && isfield(CTInput.air_in,'h_Jkgda')
+    CTAir = CTInput.air_in;
+elseif isfield(CTAmbient,'air_in') && isstruct(CTAmbient.air_in) && isfield(CTAmbient.air_in,'h_Jkgda')
+    CTAir = CTAmbient.air_in;
+else
+    CTAir = ct_psychrometrics(CTAmbient,CTConfig);
+end
 
 CTFan = ct_fan_power(CTInput,CTDesign,CTConfig);
 
@@ -84,6 +90,7 @@ CTMerkelInput.Me_available = CTTransfer.Me_available;
 CTMerkelInput.mdot_water = mdot_water;
 CTMerkelInput.mdot_dry_air = CTFan.mdot_air;
 CTMerkelInput.ambient = CTAmbient;
+CTMerkelInput.air_in = CTAir;
 CTMerkelOutput = ct_merkel_number('inverse',CTMerkelInput,CTConfig);
 
 CTOutput.merkel = CTMerkelOutput;

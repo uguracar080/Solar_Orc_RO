@@ -91,13 +91,7 @@ save(cfg.outputs.summary_mat,'cfg','Summary','Hourly','PHDesign','CTDesign','orc
 localPrintCommandLineDashboard(Summary,Hourly,cfg,RunTiming);
 
 fprintf('\nSystem V1 complete.\n');
-fprintf('Hourly output : %s\n',cfg.outputs.hourly_csv);
-fprintf('Summary output: %s\n',cfg.outputs.summary_csv);
-fprintf('MAT output    : %s\n',cfg.outputs.summary_mat);
-fprintf('Report output : %s\n',ReportFile);
-if ~isempty(FigureResults.output_dir)
-    fprintf('Figures dir   : %s\n',FigureResults.output_dir);
-end
+fprintf('Outputs : %s\n',cfg.outputs.run_dir);
 end
 
 function cfg = localFinalizeSimulationConfig(cfg)
@@ -132,6 +126,8 @@ resultsRoot = localGetStruct(cfg.outputs,'results_root',fullfile(cfg.project_roo
 if useTimestamped
     label = char(string(localGetStruct(cfg.outputs,'run_label','')));
     stamp = datestr(now,'yyyymmdd_HHMMSS');
+    simHoursText = localFormatRunHours(cfg.sim.endHour - cfg.sim.startHour);
+    stamp = [stamp '_' simHoursText];
     if ~isempty(label)
         stamp = [stamp '_' regexprep(label,'[^A-Za-z0-9_-]','_')];
     end
@@ -175,6 +171,14 @@ error('run_single_configuration_core_v1:OutputRunDir', ...
     'Could not create a unique results directory under %s.',rootDir);
 end
 
+function text = localFormatRunHours(runHours)
+if isfinite(runHours) && abs(runHours - round(runHours)) < 1e-9
+    text = sprintf('%.0f',round(runHours));
+else
+    text = regexprep(sprintf('%.6g',runHours),'[^A-Za-z0-9_-]','p');
+end
+end
+
 function [WeatherData,SeawaterData,sourceHour] = localPrepareInputWindow(cfg,WeatherAll,SeawaterAll)
 dt_h = cfg.sim.timeStep_min/60;
 sourceHour = (cfg.sim.startHour:dt_h:(cfg.sim.endHour - 0.5*dt_h)).';
@@ -209,6 +213,14 @@ if isfield(S,fieldName) && ~isempty(S.(fieldName))
     value = S.(fieldName);
 else
     value = defaultValue;
+end
+end
+
+function E_kWh = localSumColumnEnergy(T,columnName,dt_h)
+if any(strcmp(T.Properties.VariableNames,columnName))
+    E_kWh = sum(T.(columnName),'omitnan')*dt_h/1000;
+else
+    E_kWh = 0;
 end
 end
 
@@ -267,7 +279,7 @@ orcConfig.orc_stage2_printSummary = false;
 orcConfig.orc_dispatch_printSummary = false;
 orcConfig.orc_property_cache_resetAtQuickstart = false;
 orcConfig.sim_dt_s = cfg.sim.dt_s;
-orcConfig = orc_default_config(orcConfig);
+orcConfig = orc_finalize_config(orcConfig);
 
 systemInput = struct();
 systemInput.orc_W_nom = cfg.orc.W_net_design_W;
@@ -310,7 +322,7 @@ orcConfig.orc_stage2_printSummary = true;
 orcConfig.orc_dispatch_printSummary = false;
 orcConfig.orc_property_cache_resetAtQuickstart = false;
 orcConfig.sim_dt_s = cfg.sim.dt_s;
-orcConfig = orc_default_config(orcConfig);
+orcConfig = orc_finalize_config(orcConfig);
 
 systemInput = struct();
 systemInput.orc_W_nom = cfg.orc.W_net_design_W;
@@ -381,7 +393,10 @@ tf = any(strcmp(name,{'syltherm800','syltherm'}));
 end
 
 function [PHDesign,CTDesign,CTConfig] = localDesignHeatRejectionTrain(cfg,SeawaterData,orcDesign)
-TswDesign = SeawaterData.SeaWater_Temperature_C(1);
+TswDesign = localGetStruct(cfg.preheater,'T_sw_design_C',NaN);
+if ~isfinite(TswDesign)
+    TswDesign = SeawaterData.SeaWater_Temperature_C(1);
+end
 mdotSw = cfg.ro.N_train_total * cfg.ro.Qf_train_m3h * cfg.ro.rho_seawater_kgm3 / 3600;
 Qcond = abs(orcDesign.orc_thermo.Q_orccond);
 TcwInC = cfg.orc.cw_target_in_C;
@@ -395,6 +410,7 @@ PHConfig.T_cold_rise_target_C = cfg.preheater.T_RO_in_rise_C;
 PHConfig.T_cold_out_design_C = localPreheaterTargetC(cfg,TswDesign);
 PHConfig.T_cold_out_max_C = cfg.preheater.T_RO_in_max_C;
 PHConfig.geometry_family = cfg.preheater.geometry_family;
+PHConfig.N_parallel_min = localGetStruct(cfg.preheater,'N_parallel_min',1);
 PHConfig.N_parallel_max = cfg.preheater.N_parallel_max;
 PHConfig.Nt_list = localGetStruct(cfg.preheater,'Nt_min',20): ...
     localGetStruct(cfg.preheater,'Nt_step',20):localGetStruct(cfg.preheater,'Nt_max',1200);
@@ -420,6 +436,10 @@ PHInput.mdot_cold_kg_s = mdotSw;
 PHDesign = preheater_sthe_design_v1(PHInput,PHConfig);
 
 CTConfig = ct_default_config();
+CTConfig.numerics.merkel_n_intervals = localGetStruct(cfg.ct,'merkel_n_intervals',CTConfig.numerics.merkel_n_intervals);
+CTConfig.numerics.target_temperature_tolerance_C = localGetStruct(cfg.ct,'target_temperature_tolerance_C',CTConfig.numerics.target_temperature_tolerance_C);
+CTConfig.numerics.inverse_temperature_tolerance_C = localGetStruct(cfg.ct,'inverse_temperature_tolerance_C',CTConfig.numerics.inverse_temperature_tolerance_C);
+CTConfig.numerics.fan_ratio_tolerance = localGetStruct(cfg.ct,'fan_ratio_tolerance',CTConfig.numerics.fan_ratio_tolerance);
 CTConfig.water_consumption.drift_fraction = cfg.ct.drift_fraction;
 CTConfig.water_consumption.cycles_of_concentration = cfg.ct.cycles_of_concentration;
 
@@ -455,7 +475,10 @@ Summary.E_ORC_net_kWh = sum(Hourly.W_ORC_net_W(orcOn),'omitnan')*dt_h/1000;
 Summary.E_solar_pump_kWh = sum(Hourly.W_solar_pump_W,'omitnan')*dt_h/1000;
 Summary.E_RO_kWh = sum(Hourly.W_RO_total_W(roOk),'omitnan')*dt_h/1000;
 Summary.E_CT_fan_kWh = sum(Hourly.W_CT_fan_W,'omitnan')*dt_h/1000;
-Summary.E_aux_total_kWh = Summary.E_solar_pump_kWh + Summary.E_CT_fan_kWh;
+Summary.E_cw_pump_kWh = localSumColumnEnergy(Hourly,'W_cw_pump_W',dt_h);
+Summary.E_sw_feed_pump_kWh = localSumColumnEnergy(Hourly,'W_sw_feed_pump_W',dt_h);
+Summary.E_aux_total_kWh = Summary.E_solar_pump_kWh + Summary.E_CT_fan_kWh + ...
+    Summary.E_cw_pump_kWh + Summary.E_sw_feed_pump_kWh;
 Summary.E_available_for_RO_kWh = sum(Hourly.W_available_for_RO_W,'omitnan')*dt_h/1000;
 Summary.RO_product_water_m3 = sum(Hourly.Qp_total_m3h(roOk),'omitnan')*dt_h;
 Summary.CT_makeup_water_m3 = sum(Hourly.CT_makeup_m3h,'omitnan')*dt_h;
@@ -499,6 +522,12 @@ if any(strcmp(Hourly.Properties.VariableNames,'t_solar_select_s'))
     Summary.runtime_solar_select_s = sum(Hourly.t_solar_select_s,'omitnan');
     Summary.runtime_orc_dispatch_s = sum(Hourly.t_orc_dispatch_s,'omitnan');
     Summary.runtime_ro_heat_rejection_dispatch_s = sum(Hourly.t_ro_heat_rejection_dispatch_s,'omitnan');
+    if any(strcmp(Hourly.Properties.VariableNames,'t_ct_dispatch_s'))
+        Summary.runtime_ct_dispatch_s = sum(Hourly.t_ct_dispatch_s,'omitnan');
+    end
+    if any(strcmp(Hourly.Properties.VariableNames,'t_ro_dispatch_s'))
+        Summary.runtime_ro_dispatch_s = sum(Hourly.t_ro_dispatch_s,'omitnan');
+    end
     Summary.runtime_storage_s = sum(Hourly.t_storage_s,'omitnan');
     Summary.runtime_hour_sum_s = sum(Hourly.t_hour_s,'omitnan');
 end
@@ -508,25 +537,57 @@ if any(strcmp(Hourly.Properties.VariableNames,'solar_flow_candidates_evaluated')
     Summary.Solar_flow_full_search_hours = sum(Hourly.solar_flow_full_search_used);
     Summary.Solar_solver_warm_start_hours = sum(Hourly.solar_solver_warm_start_used);
 end
+if any(strcmp(Hourly.Properties.VariableNames,'solar_solver_calls_total'))
+    Summary.solar_solver_calls_total = sum(Hourly.solar_solver_calls_total,'omitnan');
+    Summary.ORC_dispatch_calls_total = sum(Hourly.ORC_dispatch_calls_total,'omitnan');
+    Summary.ORC_candidate_evaluations_total = sum(Hourly.ORC_candidate_evaluations_total,'omitnan');
+    Summary.RO_ANN_calls_total = sum(Hourly.RO_ANN_calls_total,'omitnan');
+    Summary.CT_solver_calls_total = sum(Hourly.CT_solver_calls_total,'omitnan');
+    Summary.preheater_rating_calls_total = sum(Hourly.preheater_rating_calls_total,'omitnan');
+end
 if any(strcmp(Hourly.Properties.VariableNames,'RO_P_feasible'))
     roAttempt = Hourly.ro_status == "OK" | Hourly.ro_status == "RO_DOMAIN_FAIL" | ...
         Hourly.ro_status == "RO_INFEASIBLE" | Hourly.ro_status == "POWER_LIMIT_NO_TRAIN";
     Summary.RO_ANN_attempt_hours = sum(roAttempt);
-    Summary.RO_ANN_domain_pass_hours = sum(Hourly.RO_InTrainingDomain(roAttempt));
-    Summary.RO_ANN_classifier_feasible_hours = sum(Hourly.RO_ClassifierFeasible(roAttempt));
-    if any(strcmp(Hourly.Properties.VariableNames,'RO_BoundaryFeasibleOverride'))
-        Summary.RO_ANN_boundary_override_hours = sum(Hourly.RO_BoundaryFeasibleOverride(roAttempt));
+    if any(roAttempt)
+        Summary.RO_ANN_domain_pass_hours = sum(Hourly.RO_InTrainingDomain(roAttempt));
+        Summary.RO_ANN_classifier_feasible_hours = sum(Hourly.RO_ClassifierFeasible(roAttempt));
+    else
+        Summary.RO_ANN_domain_pass_hours = 0;
+        Summary.RO_ANN_classifier_feasible_hours = 0;
     end
-    Summary.RO_ANN_P_feasible_mean = mean(Hourly.RO_P_feasible(roAttempt),'omitnan');
-    Summary.RO_ANN_P_feasible_min = min(Hourly.RO_P_feasible(roAttempt),[],'omitnan');
-    Summary.RO_ANN_P_feasible_max = max(Hourly.RO_P_feasible(roAttempt),[],'omitnan');
+    if any(strcmp(Hourly.Properties.VariableNames,'RO_BoundaryFeasibleOverride'))
+        if any(roAttempt)
+            Summary.RO_ANN_boundary_override_hours = sum(Hourly.RO_BoundaryFeasibleOverride(roAttempt));
+        else
+            Summary.RO_ANN_boundary_override_hours = 0;
+        end
+    end
+    if any(roAttempt)
+        Summary.RO_ANN_P_feasible_mean = mean(Hourly.RO_P_feasible(roAttempt),'omitnan');
+        Summary.RO_ANN_P_feasible_min = min(Hourly.RO_P_feasible(roAttempt),[],'omitnan');
+        Summary.RO_ANN_P_feasible_max = max(Hourly.RO_P_feasible(roAttempt),[],'omitnan');
+    else
+        Summary.RO_ANN_P_feasible_mean = NaN;
+        Summary.RO_ANN_P_feasible_min = NaN;
+        Summary.RO_ANN_P_feasible_max = NaN;
+    end
     if any(strcmp(Hourly.Properties.VariableNames,'RO_raw_Cp_mg_L'))
-        Summary.RO_ANN_raw_Cp_mean_mg_L = mean(Hourly.RO_raw_Cp_mg_L(roAttempt),'omitnan');
-        Summary.RO_ANN_raw_Cp_min_mg_L = min(Hourly.RO_raw_Cp_mg_L(roAttempt),[],'omitnan');
-        Summary.RO_ANN_raw_Cp_max_mg_L = max(Hourly.RO_raw_Cp_mg_L(roAttempt),[],'omitnan');
-        Summary.RO_ANN_raw_SEC_mean_kWh_m3 = mean(Hourly.RO_raw_SEC_kWh_m3(roAttempt),'omitnan');
-        Summary.RO_ANN_raw_SEC_min_kWh_m3 = min(Hourly.RO_raw_SEC_kWh_m3(roAttempt),[],'omitnan');
-        Summary.RO_ANN_raw_SEC_max_kWh_m3 = max(Hourly.RO_raw_SEC_kWh_m3(roAttempt),[],'omitnan');
+        if any(roAttempt)
+            Summary.RO_ANN_raw_Cp_mean_mg_L = mean(Hourly.RO_raw_Cp_mg_L(roAttempt),'omitnan');
+            Summary.RO_ANN_raw_Cp_min_mg_L = min(Hourly.RO_raw_Cp_mg_L(roAttempt),[],'omitnan');
+            Summary.RO_ANN_raw_Cp_max_mg_L = max(Hourly.RO_raw_Cp_mg_L(roAttempt),[],'omitnan');
+            Summary.RO_ANN_raw_SEC_mean_kWh_m3 = mean(Hourly.RO_raw_SEC_kWh_m3(roAttempt),'omitnan');
+            Summary.RO_ANN_raw_SEC_min_kWh_m3 = min(Hourly.RO_raw_SEC_kWh_m3(roAttempt),[],'omitnan');
+            Summary.RO_ANN_raw_SEC_max_kWh_m3 = max(Hourly.RO_raw_SEC_kWh_m3(roAttempt),[],'omitnan');
+        else
+            Summary.RO_ANN_raw_Cp_mean_mg_L = NaN;
+            Summary.RO_ANN_raw_Cp_min_mg_L = NaN;
+            Summary.RO_ANN_raw_Cp_max_mg_L = NaN;
+            Summary.RO_ANN_raw_SEC_mean_kWh_m3 = NaN;
+            Summary.RO_ANN_raw_SEC_min_kWh_m3 = NaN;
+            Summary.RO_ANN_raw_SEC_max_kWh_m3 = NaN;
+        end
     end
 end
 end
@@ -537,14 +598,14 @@ fprintf('===================\n');
 fprintf('Results folder: %s\n',cfg.outputs.run_dir);
 
 fprintf('\nKey run totals\n');
-fprintf('  ORC operating hours      : %.0f h\n',Summary.ORC_operating_hours);
-fprintf('  RO operating hours       : %.0f h\n',Summary.RO_operating_hours);
-fprintf('  ORC net energy           : %.3f MWh\n',Summary.E_ORC_net_kWh/1000);
-fprintf('  RO energy                : %.3f MWh\n',Summary.E_RO_kWh/1000);
-fprintf('  RO product water         : %.3f m3\n',Summary.RO_product_water_m3);
-fprintf('  CT makeup water          : %.3f m3\n',Summary.CT_makeup_water_m3);
-fprintf('  Net product water        : %.3f m3\n',Summary.Net_product_water_m3);
-fprintf('  CT target-not-met hours  : %.0f h\n',Summary.CT_target_not_met_hours);
+fprintf('  %-24s %12.0f h   | %-24s %12.0f h\n', ...
+    'ORC operating',Summary.ORC_operating_hours,'RO operating',Summary.RO_operating_hours);
+fprintf('  %-24s %12.3f MWh | %-24s %12.3f MWh\n', ...
+    'ORC net energy',Summary.E_ORC_net_kWh/1000,'RO energy',Summary.E_RO_kWh/1000);
+fprintf('  %-24s %12.3f m3  | %-24s %12.3f m3\n', ...
+    'RO product water',Summary.RO_product_water_m3,'CT makeup water',Summary.CT_makeup_water_m3);
+fprintf('  %-24s %12.3f m3  | %-24s %12.0f h\n', ...
+    'Net product water',Summary.Net_product_water_m3,'CT target-not-met',Summary.CT_target_not_met_hours);
 
 localPrintStatusTable('System status counts',Hourly,'system_status');
 localPrintStatusTable('RO status counts',Hourly,'ro_status');
@@ -554,23 +615,53 @@ localPrintStatusTable('Solar flow search counts',Hourly,'solar_flow_search_statu
 localPrintRoAnnSummary(Hourly);
 
 fprintf('\nRuntime profile\n');
-fprintf('  Input preparation        : %10.3f s\n',localGetStruct(RunTiming,'input_s',NaN));
-fprintf('  ORC design               : %10.3f s\n',localGetStruct(RunTiming,'orc_design_s',NaN));
-fprintf('  Heat-rejection design    : %10.3f s\n',localGetStruct(RunTiming,'heat_rejection_design_s',NaN));
-fprintf('  Hourly solver wall time  : %10.3f s\n',localGetStruct(RunTiming,'hourly_solver_wall_s',NaN));
-fprintf('  Figure generation        : %10.3f s\n',localGetStruct(RunTiming,'figure_generation_s',NaN));
+fprintf('  %-24s %10.3f s | %-24s %10.3f s\n', ...
+    'Input preparation',localGetStruct(RunTiming,'input_s',NaN), ...
+    'ORC design',localGetStruct(RunTiming,'orc_design_s',NaN));
+fprintf('  %-24s %10.3f s | %-24s %10.3f s\n', ...
+    'Heat-rejection design',localGetStruct(RunTiming,'heat_rejection_design_s',NaN), ...
+    'Hourly solver wall',localGetStruct(RunTiming,'hourly_solver_wall_s',NaN));
+fprintf('  %-24s %10.3f s\n', ...
+    'Figure generation',localGetStruct(RunTiming,'figure_generation_s',NaN));
 if any(strcmp(Hourly.Properties.VariableNames,'t_solar_select_s'))
-    fprintf('  Solar selection sum      : %10.3f s\n',sum(Hourly.t_solar_select_s,'omitnan'));
-    fprintf('  ORC dispatch sum         : %10.3f s\n',sum(Hourly.t_orc_dispatch_s,'omitnan'));
-    fprintf('  RO/PH/CT dispatch sum    : %10.3f s\n',sum(Hourly.t_ro_heat_rejection_dispatch_s,'omitnan'));
-    fprintf('  Storage bookkeeping sum  : %10.3f s\n',sum(Hourly.t_storage_s,'omitnan'));
+    fprintf('  %-24s %10.3f s | %-24s %10.3f s\n', ...
+        'Solar selection sum',sum(Hourly.t_solar_select_s,'omitnan'), ...
+        'ORC dispatch sum',sum(Hourly.t_orc_dispatch_s,'omitnan'));
+    fprintf('  %-24s %10.3f s', ...
+        'RO/PH/CT dispatch sum',sum(Hourly.t_ro_heat_rejection_dispatch_s,'omitnan'));
+    if any(strcmp(Hourly.Properties.VariableNames,'t_ct_dispatch_s'))
+        fprintf(' | %-24s %10.3f s', ...
+            'CT dispatch sum',sum(Hourly.t_ct_dispatch_s,'omitnan'));
+    end
+    fprintf('\n');
+    if any(strcmp(Hourly.Properties.VariableNames,'t_ro_dispatch_s'))
+        fprintf('  %-24s %10.3f s | %-24s %10.3f s\n', ...
+            'RO dispatch sum',sum(Hourly.t_ro_dispatch_s,'omitnan'), ...
+            'Storage bookkeeping',sum(Hourly.t_storage_s,'omitnan'));
+    else
+        fprintf('  %-24s %10.3f s\n', ...
+            'Storage bookkeeping',sum(Hourly.t_storage_s,'omitnan'));
+    end
 end
 if any(strcmp(Hourly.Properties.VariableNames,'solar_flow_candidates_evaluated'))
-    fprintf('  Solar candidates solved  : %10.0f total (%.2f / h)\n', ...
+    fprintf('  %-24s %10.0f total (%.2f / h) | %-24s %10.0f h\n', ...
+        'Solar candidates', ...
         sum(Hourly.solar_flow_candidates_evaluated,'omitnan'), ...
-        mean(Hourly.solar_flow_candidates_evaluated,'omitnan'));
-    fprintf('  Solar full-search hours  : %10.0f\n',sum(Hourly.solar_flow_full_search_used));
-    fprintf('  Solar fsolve warm starts : %10.0f\n',sum(Hourly.solar_solver_warm_start_used));
+        mean(Hourly.solar_flow_candidates_evaluated,'omitnan'), ...
+        'Solar full-search',sum(Hourly.solar_flow_full_search_used));
+    fprintf('  %-24s %10.0f h\n', ...
+        'Solar warm starts',sum(Hourly.solar_solver_warm_start_used));
+end
+if any(strcmp(Hourly.Properties.VariableNames,'solar_solver_calls_total'))
+    fprintf('  %-24s %10.0f total | %-24s %10.0f total\n', ...
+        'Solar solver calls',sum(Hourly.solar_solver_calls_total,'omitnan'), ...
+        'ORC dispatch calls',sum(Hourly.ORC_dispatch_calls_total,'omitnan'));
+    fprintf('  %-24s %10.0f total | %-24s %10.0f total\n', ...
+        'ORC candidate evals',sum(Hourly.ORC_candidate_evaluations_total,'omitnan'), ...
+        'RO ANN calls',sum(Hourly.RO_ANN_calls_total,'omitnan'));
+    fprintf('  %-24s %10.0f total | %-24s %10.0f total\n', ...
+        'CT solver calls',sum(Hourly.CT_solver_calls_total,'omitnan'), ...
+        'Preheater ratings',sum(Hourly.preheater_rating_calls_total,'omitnan'));
 end
 end
 
@@ -584,22 +675,29 @@ if ~any(roAttempt)
     return
 end
 fprintf('\nRO ANN diagnostics\n');
-fprintf('  Attempted hours          : %10d\n',sum(roAttempt));
-fprintf('  In training domain       : %10d\n',sum(Hourly.RO_InTrainingDomain(roAttempt)));
-fprintf('  Classifier feasible      : %10d\n',sum(Hourly.RO_ClassifierFeasible(roAttempt)));
+fprintf('  %-24s %10d h | %-24s %10d h\n', ...
+    'Attempted',sum(roAttempt),'In training domain',sum(Hourly.RO_InTrainingDomain(roAttempt)));
 if any(strcmp(Hourly.Properties.VariableNames,'RO_BoundaryFeasibleOverride'))
-    fprintf('  Boundary override        : %10d\n',sum(Hourly.RO_BoundaryFeasibleOverride(roAttempt)));
+    fprintf('  %-24s %10d h | %-24s %10d h\n', ...
+        'Classifier feasible',sum(Hourly.RO_ClassifierFeasible(roAttempt)), ...
+        'Boundary override',sum(Hourly.RO_BoundaryFeasibleOverride(roAttempt)));
+else
+    fprintf('  %-24s %10d h\n', ...
+        'Classifier feasible',sum(Hourly.RO_ClassifierFeasible(roAttempt)));
 end
-fprintf('  P_feasible mean/min/max  : %10.4f / %.4f / %.4f\n', ...
+fprintf('  %-24s %10.4f / %.4f / %.4f\n', ...
+    'P feasible mean/min/max', ...
     mean(Hourly.RO_P_feasible(roAttempt),'omitnan'), ...
     min(Hourly.RO_P_feasible(roAttempt),[],'omitnan'), ...
     max(Hourly.RO_P_feasible(roAttempt),[],'omitnan'));
 if any(strcmp(Hourly.Properties.VariableNames,'RO_raw_Cp_mg_L'))
-    fprintf('  Raw Cp mean/min/max      : %10.3f / %.3f / %.3f mg/L\n', ...
+    fprintf('  %-24s %10.3f / %.3f / %.3f mg/L\n', ...
+        'Raw Cp mean/min/max', ...
         mean(Hourly.RO_raw_Cp_mg_L(roAttempt),'omitnan'), ...
         min(Hourly.RO_raw_Cp_mg_L(roAttempt),[],'omitnan'), ...
         max(Hourly.RO_raw_Cp_mg_L(roAttempt),[],'omitnan'));
-    fprintf('  Raw SEC mean/min/max     : %10.3f / %.3f / %.3f kWh/m3\n', ...
+    fprintf('  %-24s %10.3f / %.3f / %.3f kWh/m3\n', ...
+        'Raw SEC mean/min/max', ...
         mean(Hourly.RO_raw_SEC_kWh_m3(roAttempt),'omitnan'), ...
         min(Hourly.RO_raw_SEC_kWh_m3(roAttempt),[],'omitnan'), ...
         max(Hourly.RO_raw_SEC_kWh_m3(roAttempt),[],'omitnan'));
@@ -613,8 +711,16 @@ end
 status = string(Hourly.(statusName));
 values = unique(status);
 fprintf('\n%s\n',titleText);
-for i = 1:numel(values)
-    fprintf('  %-34s %6d\n',char(values(i)),sum(status == values(i)));
+for i = 1:2:numel(values)
+    leftName = char(values(i));
+    leftCount = sum(status == values(i));
+    if i < numel(values)
+        rightName = char(values(i+1));
+        rightCount = sum(status == values(i+1));
+        fprintf('  %-34s %6d | %-34s %6d\n',leftName,leftCount,rightName,rightCount);
+    else
+        fprintf('  %-34s %6d\n',leftName,leftCount);
+    end
 end
 end
 

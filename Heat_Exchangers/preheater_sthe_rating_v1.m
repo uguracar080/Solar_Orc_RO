@@ -97,13 +97,20 @@ Qupper = max(0,Qupper);
 Q = localApproachLimitedHeat(Qupper,ThIn,TcIn,C_hot,C_cold,PHConfig.dT_min_K);
 ThOut = ThIn - Q/C_hot;
 TcOut = TcIn + Q/C_cold;
+Qmax = Cmin*max(0,ThIn - TcIn);
+if Qmax > 0
+    epsActual = min(max(Q/Qmax,0),1);
+else
+    epsActual = NaN;
+end
 
 PHOut.Q_recovered_W = Q;
 PHOut.T_hot_out_C = ThOut;
 PHOut.T_cw_out_C = ThOut;
 PHOut.T_sw_out_C = TcOut;
 PHOut.T_RO_in_C = TcOut;
-PHOut.effectiveness = epsHx;
+PHOut.effectiveness = epsActual;
+PHOut.effectiveness_ntu = epsHx;
 PHOut.NTU = NTU;
 PHOut.U_runtime_Wm2K = U;
 PHOut.UA_runtime_WK = UA;
@@ -125,23 +132,8 @@ if Qupper <= 0
     Q = 0;
     return
 end
-isOK = @(q) ((ThIn - (TcIn + q/C_cold)) >= dTmin) && ...
-            (((ThIn - q/C_hot) - TcIn) >= dTmin);
-if isOK(Qupper)
-    Q = Qupper;
-    return
-end
-lo = 0;
-hi = Qupper;
-for i = 1:60
-    mid = 0.5*(lo + hi);
-    if isOK(mid)
-        lo = mid;
-    else
-        hi = mid;
-    end
-end
-Q = lo;
+QapproachMax = max(0,min(C_hot,C_cold)*(ThIn - TcIn - dTmin));
+Q = min(Qupper,QapproachMax);
 end
 
 function flow = localFlowStruct(mdot,T_C,props)
@@ -208,6 +200,7 @@ out.mdot_hot_kg_s = NaN;
 out.mdot_sw_kg_s = NaN;
 out.Q_recovered_W = NaN;
 out.effectiveness = NaN;
+out.effectiveness_ntu = NaN;
 out.NTU = NaN;
 out.U_runtime_Wm2K = NaN;
 out.UA_runtime_WK = NaN;

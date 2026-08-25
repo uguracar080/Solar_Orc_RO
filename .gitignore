@@ -20,6 +20,7 @@ Figures/figures_*/
 *.log
 *.lst
 *.out
+tmp/
 
 # Local document and literature archive
 Dokümanlar/

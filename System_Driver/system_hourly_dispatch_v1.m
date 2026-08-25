@@ -189,9 +189,6 @@ PHInput.T_cold_out_target_C = min(TswRawC + cfg.preheater.T_RO_in_rise_C, ...
     cfg.preheater.T_RO_in_max_C);
 
 cand.PHOut = preheater_sthe_rating_v1(PHInput,PHDesign);
-[cand.CTOut,cand.ctWasNeeded] = localRunCoolingTower(cfg,WeatherData,it, ...
-    cand.PHOut.T_cw_out_C,CTDesign,CTConfig);
-cand.W_available_for_RO_W = WorcNetW - cand.CTOut.W_fan_W;
 
 ROOut = ro_predict_ann_surrogate_v1_9_1(cfg.ro.model_file, ...
     cfg.ro.Qf_train_m3h,cand.PHOut.T_RO_in_C,Cf,cfg.ro.R_target);
@@ -201,6 +198,18 @@ if ~cand.RO_domain_fail && ~cand.RO_infeasible
     cand.W_RO_total_W = nTrain * ROOut.W_RO_train_kW(1) * 1000;
     cand.Qp_total_m3h = nTrain * ROOut.Qp_train_m3h(1);
 end
+if cand.RO_domain_fail || cand.RO_infeasible
+    return
+end
+
+cand.W_available_for_RO_W = WorcNetW;
+if cand.W_RO_total_W > cand.W_available_for_RO_W
+    return
+end
+
+[cand.CTOut,cand.ctWasNeeded] = localRunCoolingTower(cfg,WeatherData,it, ...
+    cand.PHOut.T_cw_out_C,CTDesign,CTConfig);
+cand.W_available_for_RO_W = WorcNetW - cand.CTOut.W_fan_W;
 end
 
 function Dispatch = localBlankDispatch(TcwHotC,TswRawC,Ntotal)
@@ -297,11 +306,13 @@ CTAmbient.T_db_C = WeatherData.T_amb_C(it);
 CTAmbient.T_wb_C = WeatherData.T_wb_C(it);
 CTAmbient.RH_pct = WeatherData.RH_pct(it);
 CTAmbient.P_atm_Pa = WeatherData.Patm_Pa(it);
+CTAir = ct_psychrometrics(CTAmbient,CTConfig);
 
 CTInput = struct();
 CTInput.T_w_in_C = TcwInC;
 CTInput.mdot_water = cfg.orc.mdot_cw_design_kg_s;
 CTInput.T_w_out_target_C = targetC;
+CTInput.air_in = CTAir;
 
 CTOut = ct_solve_fan_for_target(CTInput,CTAmbient,CTDesign,CTConfig);
 end
