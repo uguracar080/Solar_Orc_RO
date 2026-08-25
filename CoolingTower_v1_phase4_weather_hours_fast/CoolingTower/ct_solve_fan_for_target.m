@@ -19,6 +19,7 @@ end
 
 Ttarget = CTInput.T_w_out_target_C;
 Tin = CTInput.T_w_in_C;
+targetTolC = CTConfig.numerics.target_temperature_tolerance_C;
 
 if Ttarget >= Tin
     CTInput0 = CTInput;
@@ -36,7 +37,7 @@ CTInputMax = CTInput;
 CTInputMax.fan_ratio = CTConfig.fan.fan_ratio_max;
 CTOutputMax = ct_offdesign_merkel(CTInputMax,CTAmbient,CTDesign,CTConfig);
 
-if ~isfinite(CTOutputMax.T_w_out_C) || CTOutputMax.T_w_out_C > Ttarget
+if ~localTargetMet(CTOutputMax,Ttarget,targetTolC)
     CTOutput = CTOutputMax;
     CTOutput.target.T_w_out_target_C = Ttarget;
     CTOutput.target.error_C = CTOutput.T_w_out_C - Ttarget;
@@ -50,7 +51,7 @@ CTInputLow = CTInput;
 CTInputLow.fan_ratio = CTConfig.numerics.min_fan_ratio_for_solve;
 CTOutputLow = ct_offdesign_merkel(CTInputLow,CTAmbient,CTDesign,CTConfig);
 
-if isfinite(CTOutputLow.T_w_out_C) && CTOutputLow.T_w_out_C <= Ttarget
+if localTargetMet(CTOutputLow,Ttarget,targetTolC)
     CTOutput = CTOutputLow;
     CTOutput.target.T_w_out_target_C = Ttarget;
     CTOutput.target.error_C = CTOutput.T_w_out_C - Ttarget;
@@ -64,7 +65,17 @@ residual = @(fr) fan_residual(fr,CTInput,CTAmbient,CTDesign,CTConfig,Ttarget);
 fr_low = CTConfig.numerics.min_fan_ratio_for_solve;
 fr_high = CTConfig.fan.fan_ratio_max;
 opts = optimset('TolX',CTConfig.numerics.fan_ratio_tolerance,'Display','off');
-fan_ratio_star = fzero(residual,[fr_low fr_high],opts);
+try
+    fan_ratio_star = fzero(residual,[fr_low fr_high],opts);
+catch
+    CTOutput = CTOutputMax;
+    CTOutput.target.T_w_out_target_C = Ttarget;
+    CTOutput.target.error_C = CTOutput.T_w_out_C - Ttarget;
+    CTOutput.target.met = false;
+    CTOutput.status = 'FAN_RATIO_SOLVER_FAILED';
+    CTOutput.feasible = false;
+    return
+end
 fan_ratio_star = min(max(fan_ratio_star,CTConfig.fan.fan_ratio_min),CTConfig.fan.fan_ratio_max);
 
 CTInputStar = CTInput;
@@ -72,9 +83,26 @@ CTInputStar.fan_ratio = fan_ratio_star;
 CTOutput = ct_offdesign_merkel(CTInputStar,CTAmbient,CTDesign,CTConfig);
 CTOutput.target.T_w_out_target_C = Ttarget;
 CTOutput.target.error_C = CTOutput.T_w_out_C - Ttarget;
-CTOutput.target.met = abs(CTOutput.target.error_C) <= CTConfig.numerics.target_temperature_tolerance_C || CTOutput.T_w_out_C <= Ttarget;
-CTOutput.status = 'TARGET_MET';
-CTOutput.feasible = true;
+CTOutput.target.met = localTargetMet(CTOutput,Ttarget,targetTolC);
+if CTOutput.target.met
+    CTOutput.status = 'TARGET_MET';
+    CTOutput.feasible = true;
+elseif fan_ratio_star >= CTConfig.fan.fan_ratio_max - CTConfig.numerics.fan_ratio_tolerance
+    CTOutput.status = 'AIRFLOW_LIMIT_TARGET_NOT_MET';
+    CTOutput.feasible = false;
+else
+    CTOutput.status = 'FAN_RATIO_TARGET_NOT_MET';
+    CTOutput.feasible = false;
+end
+end
+
+function tf = localTargetMet(CTOutput,Ttarget,targetTolC)
+if ~isfield(CTOutput,'T_w_out_C') || ~isfinite(CTOutput.T_w_out_C)
+    tf = false;
+else
+    % The tower may overcool; only outlet temperatures above target+tolerance fail.
+    tf = CTOutput.T_w_out_C <= Ttarget + targetTolC;
+end
 end
 
 function F = fan_residual(fan_ratio,CTInput,CTAmbient,CTDesign,CTConfig,Ttarget)

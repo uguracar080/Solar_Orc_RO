@@ -50,7 +50,7 @@ CTConfig.numerics.min_approach_C = 0.05;
 CTConfig.numerics.min_enthalpy_potential_Jkgda = 10;
 CTConfig.numerics.min_fan_ratio_for_solve = 1e-4;
 CTConfig.numerics.target_temperature_tolerance_C = 0.02;
-CTConfig.numerics.inverse_temperature_tolerance_C = 0.02;
+CTConfig.numerics.inverse_temperature_tolerance_C = 1e-4;
 CTConfig.numerics.fan_ratio_tolerance = 1e-4;
 
 % -------------------------------------------------------------------------

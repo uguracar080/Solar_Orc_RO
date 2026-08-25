@@ -121,6 +121,20 @@ localPrintField(fid,D,'N_parallel','  ');
 localPrintField(fid,D,'Nt','  ');
 localPrintField(fid,D,'Ltube_m','  ');
 localPrintField(fid,D,'Dshell_m','  ');
+localPrintField(fid,D,'dp_hot_design_Pa','  ');
+localPrintField(fid,D,'dp_cold_design_Pa','  ');
+localPrintField(fid,D,'dp_hot_max_Pa','  ');
+localPrintField(fid,D,'dp_cold_max_Pa','  ');
+localPrintField(fid,D,'hot_velocity_design_m_s','  ');
+localPrintField(fid,D,'cold_velocity_design_m_s','  ');
+localPrintField(fid,D,'pump_power_hot_design_W','  ');
+localPrintField(fid,D,'pump_power_cold_design_W','  ');
+localPrintField(fid,D,'candidate_score','  ');
+localPrintField(fid,D,'candidate_score_basis','  ');
+localPrintField(fid,D,'selected_reason','  ');
+if isfield(D,'search') && isstruct(D.search)
+    localPrintStruct(fid,D.search,'  search',2);
+end
 localPrintField(fid,D,'T_cold_in_design_C','  ');
 localPrintField(fid,D,'T_cold_out_design_C','  ');
 localPrintField(fid,D,'T_cold_out_requested_C','  ');

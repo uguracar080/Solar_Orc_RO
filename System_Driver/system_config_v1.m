@@ -99,13 +99,15 @@ cfg.preheater.N_parallel_max = 20;
 cfg.preheater.Nt_min = 20;
 cfg.preheater.Nt_max = 1200;
 cfg.preheater.Nt_step = 20;
+cfg.preheater.design.dp_hot_max_Pa = 25e3;
+cfg.preheater.design.dp_cold_max_Pa = 25e3;
 
 cfg.ct = struct();
 cfg.ct.T_cw_target_C = cfg.orc.cw_target_in_C;
 cfg.ct.Q_rated_fraction_of_design_condenser = 1.00;
 cfg.ct.merkel_n_intervals = 50;
 cfg.ct.target_temperature_tolerance_C = 0.02;
-cfg.ct.inverse_temperature_tolerance_C = 0.02;
+cfg.ct.inverse_temperature_tolerance_C = 1e-4;
 cfg.ct.fan_ratio_tolerance = 1e-4;
 cfg.ct.drift_fraction = 2e-5;
 cfg.ct.cycles_of_concentration = 5;

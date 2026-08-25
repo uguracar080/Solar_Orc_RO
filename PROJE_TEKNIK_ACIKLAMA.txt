@@ -2446,3 +2446,124 @@ Pratik kural:
 
   Kod degisikligi "baska yazilimci bunu bilmeden hatali kullanir" dedirtiyorsa
   bu dosyaya da not dusulmelidir.
+
+
+34. 2026-08-25 CT NUMERIK VE PREHEATER DESIGN GUNCELLEMESI
+----------------------------------------------------------
+
+Bu guncelleme full-year/8760 kosusu calistirmadan yapildi. Amac, son
+run_20260825_131434_8760 kosusunda gorulen CT target/status celiskisini ve
+preheater'in ilk feasible N_parallel secimi nedeniyle yuksek hot-side dP'ye
+gitmesini duzeltmektir.
+
+Cooling tower numerics:
+
+  Aktif hizli CT ayarlari:
+    merkel_n_intervals = 50
+    target_temperature_tolerance_C = 0.02
+    inverse_temperature_tolerance_C = 1e-4
+    fan_ratio_tolerance = 1e-4
+
+  ct_solve_fan_for_target artik TARGET_MET status'unu yalnizca T_w_out_C <=
+  T_target + target_temperature_tolerance_C saglanirsa verir. Hedef maksimum
+  fan/airflow limitinde karsilanamiyorsa status AIRFLOW_LIMIT_TARGET_NOT_MET
+  ve target.met=false kalir. fzero veya son kontrol hatalari TARGET_MET olarak
+  etiketlenmez.
+
+  ct_solver_sensitivity_v1 varsayilan testi artik yalniz sabit T_CT_in ile
+  calismaz. Weather cache icinden dusuk/orta/yuksek wet-bulb ve sicak yaz
+  noktalarini secer; T_CT_in = 28:34 C sweep'i uygular. 2026-08-25 kisa test:
+    weather cases = 4
+    test points = 28
+    reference = merkel_n_intervals 100, target tol 0.02 C, inverse tol 1e-4 C
+    fast      = merkel_n_intervals 50,  target tol 0.02 C, inverse tol 1e-4 C
+    runtime reference/fast = 2.590 s / 2.003 s
+    speedup = 1.29x
+    max |Delta T_CT_out| = 0.000191 C
+    mean |Delta T_CT_out| = 1.06e-5 C
+    max |Delta Q_rejected| = 79.96 W
+    max relative |Delta Q_rejected| = 2.76e-5
+    status mismatch = 0
+    target.met mismatch = 0
+    TARGET_MET contradiction = 0
+
+Preheater STHE design:
+
+  cfg.preheater.design.dp_hot_max_Pa ve cfg.preheater.design.dp_cold_max_Pa
+  alanlari eklendi. Default degerler her iki taraf icin 25 kPa'dir. Bu limitler
+  STHE branch pressure drop icin konservatif tasarim siniri olarak kullanilir
+  ve ileride optimizer constraint/design variable haline getirilebilir.
+
+  preheater_sthe_design_v1 artik ilk feasible N_parallel degerinde aramayi
+  durdurmaz. N_parallel_min:N_parallel_max araliginin tamamini ve Nt_list'i
+  tarar. Candidate secimi sirasi:
+    1. termal hedef ve minimum approach
+    2. STHE geometri ve tube-length limitleri
+    3. mevcut hiz/korrelasyon kaynakli mekanik uygunluk
+    4. dp_hot <= dp_hot_max_Pa
+    5. dp_cold <= dp_cold_max_Pa
+    6. pressure-drop feasible adaylar icinden minimum toplam alan skoru
+
+  Design output artik su alanlari acikca tasir:
+    dp_hot_design_Pa, dp_cold_design_Pa
+    dp_hot_max_Pa, dp_cold_max_Pa
+    hot_velocity_design_m_s, cold_velocity_design_m_s
+    pump_power_hot_design_W, pump_power_cold_design_W
+    candidate_score, candidate_score_basis, selected_reason
+    search.* candidate arama sayaclari
+
+  run_single_configuration_v1 ayarlariyla 48 saatlik regression oncesi yeni
+  design sonucu:
+    N_parallel = 5
+    Nt = 100
+    Area = 301.342 m2
+    U = 1578.84 W/m2K
+    dp_hot_design = 24.324 kPa
+    dp_cold_design = 1.462 kPa
+    hot velocity = 0.5209 m/s
+    cold velocity = 0.5097 m/s
+    hot pump power estimate = 3.424 kW
+    cold pump power estimate = 0.188 kW
+    N_parallel tested = 20
+    candidates evaluated = 1200
+    thermal/geometric feasible = 347
+    dp rejected = 44
+    pressure-drop feasible = 303
+
+Kisa system regression:
+
+  Full-year kosu baslatilmadi. Temsili 48 saatlik pencere:
+    source_hour = 4356..4404
+    run_dir = Results/run_20260825_163106_48_codex_regression_48h
+
+  Sonuclar:
+    coupling failure = 0
+    max N_coupling_iter = 2
+    ct_status TARGET_MET iken target ihlali = 0
+    kritik numeric kolonlarda NaN/Inf = 0
+    ORC operating = 22 h
+    RO operating = 22 h
+    CT TARGET_MET = 17 h
+    CT AIRFLOW_LIMIT_TARGET_NOT_MET = 5 h
+    CT NOT_NEEDED = 26 h
+
+  48 saatlik runtime/profiler:
+    runtime_hourly_solver_wall_s = 23.665
+    runtime_solar_select_s = 6.549
+    runtime_orc_dispatch_s = 10.033
+    runtime_ro_heat_rejection_dispatch_s = 6.501
+    runtime_ct_dispatch_s = 2.599
+    runtime_ro_dispatch_s = 3.651
+    solar_solver_calls_total = 308
+    ORC_dispatch_calls_total = 31
+    ORC_candidate_evaluations_total = 566
+    RO_ANN_calls_total = 66
+    CT_solver_calls_total = 42
+    preheater_rating_calls_total = 40
+
+Acik kalan nokta:
+
+  Bu kisa testler CT status mantigini, preheater dP constraint'ini ve 48 saatlik
+  sistem davranisini dogrular. Tum yil boyunca CT limit saatlerinin dagilimi,
+  yillik enerji/su etkisi ve runtime sadece manuel 8760 kosusu sonrasi kesin
+  degerlendirilebilir.

@@ -70,20 +70,33 @@ lmtd = localLmtd(dT1,dT2);
 best = [];
 NparMin = max(1,round(PHConfig.N_parallel_min));
 NparMax = max(NparMin,round(PHConfig.N_parallel_max));
+search = localBlankSearchSummary(NparMin,NparMax,numel(PHConfig.Nt_list),PHConfig);
 for Npar = NparMin:NparMax
-    bestThis = [];
     for Nt = PHConfig.Nt_list
+        search.candidates_evaluated_total = search.candidates_evaluated_total + 1;
         cand = localEvaluateCandidate(Npar,Nt,Qtotal,lmtd,ThIn,ThOut,TcIn,TcOutTarget, ...
             mdotHot,mdotCold,PHConfig,orcConfig);
-        if cand.ok && (isempty(bestThis) || cand.score < bestThis.score)
-            bestThis = cand;
+        if cand.thermal_geometric_ok
+            search.candidates_thermal_geometric_feasible = search.candidates_thermal_geometric_feasible + 1;
+        end
+        if cand.dp_rejected
+            search.candidates_dp_rejected = search.candidates_dp_rejected + 1;
+            if ~cand.dp_hot_ok
+                search.candidates_dp_hot_rejected = search.candidates_dp_hot_rejected + 1;
+            end
+            if ~cand.dp_cold_ok
+                search.candidates_dp_cold_rejected = search.candidates_dp_cold_rejected + 1;
+            end
+        end
+        if cand.ok
+            search.candidates_feasible_after_dp = search.candidates_feasible_after_dp + 1;
+            if isempty(best) || cand.score < best.score
+                best = cand;
+            end
         end
     end
-    if ~isempty(bestThis)
-        best = bestThis;
-        break
-    end
 end
+PHDesign.search = search;
 
 if isempty(best)
     PHDesign.status = 'NO_FEASIBLE_STHE_GEOMETRY';
@@ -113,16 +126,27 @@ PHDesign.Dshell_m = best.geometry.Dshell;
 PHDesign.geometry = best.geometry;
 PHDesign.dp_hot_Pa = best.dp_hot_Pa;
 PHDesign.dp_cold_Pa = best.dp_cold_Pa;
+PHDesign.dp_hot_design_Pa = best.dp_hot_Pa;
+PHDesign.dp_cold_design_Pa = best.dp_cold_Pa;
+PHDesign.dp_hot_max_Pa = best.dp_hot_max_Pa;
+PHDesign.dp_cold_max_Pa = best.dp_cold_max_Pa;
+PHDesign.hot_velocity_design_m_s = best.hot_velocity_m_s;
+PHDesign.cold_velocity_design_m_s = best.cold_velocity_m_s;
+PHDesign.candidate_score = best.score;
+PHDesign.candidate_score_basis = 'minimum_total_area_after_thermal_geometric_velocity_and_dp_constraints';
+PHDesign.selected_reason = sprintf('Lowest total area among %d pressure-drop-feasible candidates over N_parallel=%d..%d.', ...
+    PHDesign.search.candidates_feasible_after_dp,PHDesign.search.N_parallel_min,PHDesign.search.N_parallel_max);
 PHDesign.shell = best.shell;
 PHDesign.tube = best.tube;
 PHDesign.method = 'local_copy_of_ORC_v23_STHE_singlephase_geometry_and_correlations';
 end
 
 function cand = localEvaluateCandidate(Npar,Nt,Qtotal,lmtd,ThIn,ThOut,TcIn,TcOut,mdotHot,mdotCold,PHConfig,orcConfig)
-cand = struct('ok',false,'score',inf);
+cand = localBlankCandidate(Npar,Nt,PHConfig);
 try
     geom0 = preheater_sthe_core_v1('geometry',PHConfig.geometry_family,Nt,NaN,orcConfig);
     if ~geom0.orc_geometryOK
+        cand.reject_reason = 'INITIAL_GEOMETRY_LIMIT';
         return
     end
 
@@ -139,11 +163,13 @@ try
     Ltube = LtubeReq*(1+orcConfig.orc_hx_designAreaMargin);
 
     if Ltube < orcConfig.orc_hx_minTubeLength || Ltube > orcConfig.orc_hx_maxTubeLength
+        cand.reject_reason = 'TUBE_LENGTH_LIMIT';
         return
     end
 
     geom = preheater_sthe_core_v1('geometry',PHConfig.geometry_family,Nt,Ltube,orcConfig);
     if ~geom.orc_geometryOK
+        cand.reject_reason = 'FINAL_GEOMETRY_LIMIT';
         return
     end
 
@@ -151,8 +177,7 @@ try
     tube = preheater_sthe_core_v1('tube_singlephase',coldFlow,geom,Ltube);
     AgeoMod = pi*geom.do*geom.Nt*geom.Ltube;
 
-    cand.ok = true;
-    cand.score = Npar*AgeoMod;
+    cand.thermal_geometric_ok = true;
     cand.N_parallel = Npar;
     cand.geometry = geom;
     cand.U_Wm2K = localOverallU(shell.h,tube.h);
@@ -161,11 +186,69 @@ try
     cand.A_required_total_m2 = Npar*Areq;
     cand.dp_hot_Pa = shell.dp;
     cand.dp_cold_Pa = tube.dp;
+    cand.hot_velocity_m_s = shell.u_mean;
+    cand.cold_velocity_m_s = tube.velocity;
+    cand.dp_hot_ok = isfinite(shell.dp) && shell.dp <= cand.dp_hot_max_Pa;
+    cand.dp_cold_ok = isfinite(tube.dp) && tube.dp <= cand.dp_cold_max_Pa;
+    if ~(cand.dp_hot_ok && cand.dp_cold_ok)
+        cand.dp_rejected = true;
+        cand.reject_reason = 'PRESSURE_DROP_LIMIT';
+        return
+    end
+    cand.ok = true;
+    cand.score = Npar*AgeoMod;
+    cand.reject_reason = '';
     cand.shell = shell;
     cand.tube = tube;
-catch
+catch ME
     cand.ok = false;
+    cand.reject_reason = ME.identifier;
 end
+end
+
+function cand = localBlankCandidate(Npar,Nt,PHConfig)
+[dpHotMax,dpColdMax] = localPressureDropLimits(PHConfig);
+cand = struct();
+cand.ok = false;
+cand.score = inf;
+cand.N_parallel = Npar;
+cand.Nt = Nt;
+cand.thermal_geometric_ok = false;
+cand.dp_rejected = false;
+cand.dp_hot_ok = false;
+cand.dp_cold_ok = false;
+cand.dp_hot_max_Pa = dpHotMax;
+cand.dp_cold_max_Pa = dpColdMax;
+cand.dp_hot_Pa = NaN;
+cand.dp_cold_Pa = NaN;
+cand.hot_velocity_m_s = NaN;
+cand.cold_velocity_m_s = NaN;
+cand.reject_reason = 'NOT_EVALUATED';
+end
+
+function search = localBlankSearchSummary(NparMin,NparMax,nNt,PHConfig)
+[dpHotMax,dpColdMax] = localPressureDropLimits(PHConfig);
+search = struct();
+search.N_parallel_min = NparMin;
+search.N_parallel_max = NparMax;
+search.N_parallel_tested = NparMax - NparMin + 1;
+search.Nt_values_per_parallel = nNt;
+search.candidates_evaluated_total = 0;
+search.candidates_thermal_geometric_feasible = 0;
+search.candidates_dp_rejected = 0;
+search.candidates_dp_hot_rejected = 0;
+search.candidates_dp_cold_rejected = 0;
+search.candidates_feasible_after_dp = 0;
+search.dp_hot_max_Pa = dpHotMax;
+search.dp_cold_max_Pa = dpColdMax;
+end
+
+function [dpHotMax,dpColdMax] = localPressureDropLimits(PHConfig)
+design = localGet(PHConfig,'design',struct());
+dpHotMax = localGet(design,'dp_hot_max_Pa',localGet(PHConfig,'dp_hot_max_Pa',25e3));
+dpColdMax = localGet(design,'dp_cold_max_Pa',localGet(PHConfig,'dp_cold_max_Pa',25e3));
+dpHotMax = max(dpHotMax,0);
+dpColdMax = max(dpColdMax,0);
 end
 
 function flow = localFlowStruct(mdot,T_C,props)
@@ -197,6 +280,13 @@ cfg = localSetDefault(cfg,'geometry_family','condenser');
 cfg = localSetDefault(cfg,'N_parallel_min',1);
 cfg = localSetDefault(cfg,'N_parallel_max',20);
 cfg = localSetDefault(cfg,'Nt_list',20:20:1200);
+if ~isfield(cfg,'design') || isempty(cfg.design)
+    cfg.design = struct();
+end
+% Conservative STHE branch limits. Keeping preheater dP near ordinary pump
+% design values prevents compact, high-velocity geometries from winning.
+cfg.design = localSetDefault(cfg.design,'dp_hot_max_Pa',25e3);
+cfg.design = localSetDefault(cfg.design,'dp_cold_max_Pa',25e3);
 if ~isfield(cfg,'orc_config') || isempty(cfg.orc_config)
     cfg.orc_config = struct();
 end
@@ -250,6 +340,18 @@ D.Ltube_m = NaN;
 D.Dshell_m = NaN;
 D.dp_hot_Pa = NaN;
 D.dp_cold_Pa = NaN;
+D.dp_hot_design_Pa = NaN;
+D.dp_cold_design_Pa = NaN;
+D.dp_hot_max_Pa = NaN;
+D.dp_cold_max_Pa = NaN;
+D.hot_velocity_design_m_s = NaN;
+D.cold_velocity_design_m_s = NaN;
+D.pump_power_hot_design_W = NaN;
+D.pump_power_cold_design_W = NaN;
+D.candidate_score = NaN;
+D.candidate_score_basis = '';
+D.selected_reason = '';
+D.search = struct();
 D.method = '';
 end
 

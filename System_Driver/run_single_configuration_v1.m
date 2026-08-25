@@ -56,6 +56,8 @@ cfg.preheater.N_parallel_max = 20;
 cfg.preheater.Nt_min = 20;
 cfg.preheater.Nt_max = 1200;
 cfg.preheater.Nt_step = 20;
+cfg.preheater.design.dp_hot_max_Pa = 25e3;
+cfg.preheater.design.dp_cold_max_Pa = 25e3;
 cfg.ct.Q_rated_fraction_of_design_condenser = 1.00;
 
 % Temporary thermal storage placeholder for excess solar heat.

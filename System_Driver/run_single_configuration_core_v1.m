@@ -414,6 +414,11 @@ PHConfig.N_parallel_min = localGetStruct(cfg.preheater,'N_parallel_min',1);
 PHConfig.N_parallel_max = cfg.preheater.N_parallel_max;
 PHConfig.Nt_list = localGetStruct(cfg.preheater,'Nt_min',20): ...
     localGetStruct(cfg.preheater,'Nt_step',20):localGetStruct(cfg.preheater,'Nt_max',1200);
+PHConfig.design = localGetStruct(cfg.preheater,'design',struct());
+PHConfig.design.dp_hot_max_Pa = localGetStruct(PHConfig.design,'dp_hot_max_Pa', ...
+    localGetStruct(cfg.preheater,'dp_hot_max_Pa',25e3));
+PHConfig.design.dp_cold_max_Pa = localGetStruct(PHConfig.design,'dp_cold_max_Pa', ...
+    localGetStruct(cfg.preheater,'dp_cold_max_Pa',25e3));
 PHConfig.hot.cp_JkgK = cfg.preheater.cp_hot_JkgK;
 PHConfig.hot.rho_kgm3 = cfg.preheater.hot_rho_kgm3;
 PHConfig.hot.mu_Pas = cfg.preheater.hot_mu_Pas;
@@ -434,6 +439,7 @@ PHInput.T_cold_out_target_C = PHConfig.T_cold_out_design_C;
 PHInput.mdot_hot_kg_s = cfg.orc.mdot_cw_design_kg_s;
 PHInput.mdot_cold_kg_s = mdotSw;
 PHDesign = preheater_sthe_design_v1(PHInput,PHConfig);
+PHDesign = localAnnotatePreheaterDesignPumps(PHDesign,cfg);
 
 CTConfig = ct_default_config();
 CTConfig.numerics.merkel_n_intervals = localGetStruct(cfg.ct,'merkel_n_intervals',CTConfig.numerics.merkel_n_intervals);
@@ -452,6 +458,34 @@ CTRatingInput.approach_rated_C = max(cfg.ct.T_cw_target_C - CTRatingInput.T_wb_r
 CTRatingInput.range_rated_C = max(CTRatingInput.Q_rated_W / ...
     (cfg.orc.mdot_cw_design_kg_s*cfg.preheater.cp_hot_JkgK),CTConfig.numerics.min_approach_C);
 CTDesign = ct_rate_design_point(CTRatingInput,CTConfig);
+end
+
+function PHDesign = localAnnotatePreheaterDesignPumps(PHDesign,cfg)
+if ~isstruct(PHDesign)
+    return
+end
+cwPumpCfg = localGetNestedStruct(cfg,'pumps','cw_circulation',struct('enabled',true,'eta_hydraulic',0.75,'eta_motor',0.95));
+swPumpCfg = localGetNestedStruct(cfg,'pumps','seawater_feed',struct('enabled',true,'eta_hydraulic',0.75,'eta_motor',0.95));
+PHDesign.pump_power_hot_design_W = localHydraulicPumpPowerDesign( ...
+    localGetStruct(PHDesign,'mdot_hot_design_kg_s',localGetNestedStruct(cfg,'orc','mdot_cw_design_kg_s',0)), ...
+    localGetStruct(PHDesign,'dp_hot_design_Pa',localGetStruct(PHDesign,'dp_hot_Pa',0)), ...
+    localGetNestedStruct(cfg,'preheater','hot_rho_kgm3',997),cwPumpCfg);
+PHDesign.pump_power_cold_design_W = localHydraulicPumpPowerDesign( ...
+    localGetStruct(PHDesign,'mdot_cold_design_kg_s',0), ...
+    localGetStruct(PHDesign,'dp_cold_design_Pa',localGetStruct(PHDesign,'dp_cold_Pa',0)), ...
+    localGetNestedStruct(cfg,'ro','rho_seawater_kgm3',1025),swPumpCfg);
+end
+
+function W = localHydraulicPumpPowerDesign(mdot,dP,rho,pumpCfg)
+W = 0;
+if ~isstruct(pumpCfg) || ~localGetStruct(pumpCfg,'enabled',true)
+    return
+end
+if ~(isfinite(mdot) && isfinite(dP) && isfinite(rho)) || mdot <= 0 || dP <= 0 || rho <= 0
+    return
+end
+etaTotal = max(localGetStruct(pumpCfg,'eta_hydraulic',0.75)*localGetStruct(pumpCfg,'eta_motor',0.95),eps);
+W = mdot*dP/(rho*etaTotal);
 end
 
 function targetC = localPreheaterTargetC(cfg,TswC)
